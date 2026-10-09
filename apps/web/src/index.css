@@ -1,0 +1,531 @@
+@import "tailwindcss";
+
+/*
+ * Design system: os tokens não são inventados — são as rampas de cor do
+ * gerador das cartas (`tools/cards/gen_card.py`). O texto é feito do material
+ * da MOLDURA da carta; a ênfase, do rosa do VERSO. Assim a interface e o
+ * baralho são literalmente a mesma coisa.
+ *
+ * Regras do sistema, todas herdadas do pixel art das cartas:
+ *   · nada de blur, nada de border-radius, nada de gradiente suave;
+ *   · tudo na grade de 4px (a carta tem chanfro de 4px e traço de 2px);
+ *   · relevo de 3 partes (claro em cima/esquerda, escuro embaixo/direita),
+ *     que é a mesma estrutura que dá volume aos índices das cartas;
+ *   · sombra dura deslocada 4px, nunca difusa.
+ */
+
+:root {
+  /*
+   * --- os painéis ---
+   * O verso do baralho é claro (creme e rosa), e um painel claro atrás de uma
+   * carta clara apagaria a carta: a chapa é o mesmo rosa levado ao escuro, o
+   * ROXO que sobra do `pink_d` (#9e6180) quando se tira a luz dele. Continua
+   * sendo a cor do verso — é a mesma matiz —, e ainda deixa a carta recortada.
+   */
+  --slab-hi: #2f2731;
+  --slab: #241e26;
+  --slab-sh: #150f17;
+  --rim: #0a080b;
+  --gloss: #57495a;
+
+  /* --- material da moldura (FRM em gen_card.py): o texto --- */
+  --ink: #1b1215;
+  --paper-hi: #fbf7ee;
+  --paper: #f1ebdd;
+  --paper-sh: #c4bcaa;
+
+  /* --- o rosa da trama do verso: a única cor de ênfase --- */
+  --mark-hi: #fde375;
+  --mark: #f5ce45;
+  --mark-sh: #c6911c;
+
+  /* As camadas do mostrador de pontos, de baixo para cima: a de baixo é
+     `--mark`, e estas só aparecem em mesas de mais de dez pontos. Cores
+     distintas entre si, todas com o mesmo peso — nenhuma camada é "melhor"
+     que a outra, elas só são outra. */
+  --pip-amber: #d9a03c;
+  --pip-green: #5cae4f;
+  --pip-blue: #6f93c9;
+  --pip-violet: #a878c9;
+
+  /* --- as duas tintas do baralho francês (INK em gen_card.py) --- */
+  --ink-red: #d9453f;
+  --ink-black: #2a2126;
+
+  /* Verde de "conectado", e só isso: é sinal de estado, não cor da paleta. */
+  --live: #4ca742;
+
+  /*
+   * --- o pano da mesa ---
+   * Cinco, todos do mesmo valor: a carta, o texto creme e o rosa da ênfase têm
+   * de ler igual sobre qualquer um deles. Quem escolhe é quem olha, e a escolha
+   * chega aqui como um `data-felt` no <html> — ver `lib/felt.ts`.
+   */
+  --felt-green: #14301e;
+  --felt-burgundy: #34121c;
+  --felt-navy: #142339;
+  --felt-charcoal: #1e1e22;
+  --felt-walnut: #2a1b12;
+  --felt: var(--felt-green);
+
+  /* --- métrica --- */
+  --stroke: 2px;
+  --bevel: inset 2px 2px 0 var(--slab-hi), inset -2px -2px 0 var(--slab-sh);
+  --drop: 4px 4px 0 rgba(6, 6, 8, 0.7);
+  --drop-sm: 2px 2px 0 rgba(6, 6, 8, 0.7);
+
+}
+
+body {
+  margin: 0;
+  color: var(--paper);
+  background-color: var(--felt);
+  /* trama de 4px: textura de feltro em linguagem de pixel, sem desfoque */
+  background-image:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.14) 0 1px, transparent 1px 4px);
+  font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  -webkit-font-smoothing: none;
+  overscroll-behavior: none;
+  /*
+   * `clip` e não `hidden`: hidden criaria um contêiner de rolagem e prenderia a
+   * carta arrastada (armadilha #8 do reference/uno_card.md). `clip` só corta, no eixo
+   * horizontal, o que já estaria fora da janela — e deixa o eixo vertical
+   * visível, sem coagir para `auto`.
+   */
+  overflow-x: clip;
+  overflow-y: visible;
+}
+
+:focus-visible {
+  outline: var(--stroke) solid var(--mark);
+  outline-offset: 2px;
+}
+
+/* ---- chapa: a peça base de toda a interface ------------------------------ */
+
+.px-slab {
+  background: var(--slab);
+  border: var(--stroke) solid var(--rim);
+  box-shadow: var(--bevel), var(--drop);
+}
+
+.px-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--gloss);
+}
+
+.px-title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--paper-hi);
+  text-shadow: 2px 2px 0 var(--rim);
+}
+
+/* ---- botão: aperta de verdade -------------------------------------------- */
+
+.px-btn {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--paper);
+  background: var(--slab-hi);
+  border: var(--stroke) solid var(--rim);
+  box-shadow: var(--bevel), var(--drop-sm);
+  padding: 8px 16px;
+  cursor: pointer;
+}
+.px-btn:not(:disabled):hover {
+  background: var(--gloss);
+}
+.px-btn:not(:disabled):active {
+  /* a peça afunda exatamente a altura da própria sombra */
+  transform: translate(2px, 2px);
+  box-shadow: var(--bevel);
+}
+.px-btn:disabled {
+  cursor: default;
+  color: var(--gloss);
+  background: var(--slab-sh);
+  box-shadow: var(--bevel);
+}
+
+.px-btn-primary {
+  color: var(--ink);
+  background: var(--mark);
+  box-shadow:
+    inset 2px 2px 0 var(--mark-hi),
+    inset -2px -2px 0 var(--mark-sh),
+    var(--drop-sm);
+}
+.px-btn-primary:not(:disabled):hover {
+  background: var(--mark-hi);
+}
+.px-btn-primary:not(:disabled):active {
+  transform: translate(2px, 2px);
+  box-shadow: inset 2px 2px 0 var(--mark-hi), inset -2px -2px 0 var(--mark-sh);
+}
+.px-btn-primary:disabled {
+  color: var(--slab);
+  background: var(--mark-sh);
+}
+
+/* Um botão que a mesa está esperando pisca em quadros, para não passar
+   despercebido. Sem regra ainda não há quem o use — a peça fica de pé. */
+@keyframes px-urgent {
+  50% {
+    background: var(--mark-hi);
+  }
+}
+.px-btn-urgent {
+  animation: px-urgent 0.5s steps(1, end) infinite;
+}
+
+/* Aparecer é o aviso: a peça salta em três quadros, como um sprite entrando. */
+@keyframes px-pop {
+  0% {
+    transform: scale(0.4);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.px-pop {
+  animation: px-pop 0.18s steps(3, end);
+}
+/* As duas juntas precisam de uma regra própria: `animation` é shorthand, e a
+   última a valer apagaria a outra. */
+.px-btn-urgent.px-pop {
+  animation:
+    px-pop 0.18s steps(3, end),
+    px-urgent 0.5s steps(1, end) infinite;
+}
+
+.px-link {
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gloss);
+  background: none;
+  border: 0;
+  padding: 4px;
+  cursor: pointer;
+}
+.px-link:hover {
+  color: var(--paper);
+}
+
+/*
+ * O crédito no rodapé da porta de entrada.
+ *
+ * Um link precisa dizer que é um link PARADO: no celular não há hover que o
+ * revele, e no tom do rótulo à esquerda o nome se lê como mais uma palavra da
+ * frase. O sublinhado é o mesmo traço de 2px que faz toda borda desta
+ * interface, e a folga é a mesma grade de 4px — nada de novo entrou no
+ * sistema, só um traço onde ele faltava.
+ */
+.px-credit {
+  color: var(--paper-sh);
+  padding: 4px 0;
+  border-bottom: var(--stroke) solid var(--gloss);
+}
+.px-credit:hover,
+.px-credit:focus-visible {
+  color: var(--mark);
+  border-bottom-color: var(--mark);
+}
+
+/* ---- campo: relevo invertido, como um sulco ------------------------------ */
+
+.px-input {
+  font: inherit;
+  color: var(--paper-hi);
+  background: var(--slab-sh);
+  border: var(--stroke) solid var(--rim);
+  box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.5);
+  padding: 8px 12px;
+  width: 100%;
+}
+.px-input::placeholder {
+  color: var(--gloss);
+}
+
+/* ---- código da sala: o dado mais importante da tela de espera ------------ */
+
+.px-code {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  color: var(--mark);
+  text-shadow: 2px 2px 0 var(--rim);
+}
+
+/* ---- cursor piscando: pixel pisca em quadros, não em rampa --------------- */
+
+@keyframes px-blink {
+  50% {
+    opacity: 0;
+  }
+}
+.px-caret {
+  animation: px-blink 1s steps(1, end) infinite;
+}
+
+/* ---- menus pendurados no cabeçalho ------------------------------------- */
+
+.px-menu summary {
+  cursor: pointer;
+  list-style: none;
+}
+.px-menu summary::-webkit-details-marker {
+  display: none;
+}
+.px-menu[open] summary {
+  color: var(--mark);
+}
+.px-menu-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 35;
+  width: max-content;
+  max-width: min(88vw, 340px);
+}
+
+.px-switch {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.px-switch-dot {
+  background: transparent;
+  border: 2px solid var(--gloss);
+}
+.px-switch[aria-checked="true"] .px-switch-dot {
+  background: var(--mark);
+}
+.px-switch-label {
+  color: var(--gloss);
+}
+.px-switch[aria-checked="true"] .px-switch-label,
+.px-switch:hover .px-switch-label {
+  color: var(--paper-hi);
+}
+
+/* ---- a conversa ---------------------------------------------------------- */
+
+.px-emotes summary {
+  cursor: pointer;
+  list-style: none;
+}
+.px-emotes summary::-webkit-details-marker {
+  display: none;
+}
+.px-emote-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 35;
+  width: max-content;
+  max-width: 88vw;
+}
+.px-emote-key {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  font-size: 20px;
+  line-height: 1;
+  border: var(--stroke) solid var(--rim);
+  background: var(--ink);
+  cursor: pointer;
+}
+.px-emote-key:hover:not(:disabled) {
+  background: var(--slab);
+}
+.px-emote-key:active:not(:disabled) {
+  transform: translate(1px, 1px);
+}
+.px-emote-key:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+/* ============================ A ARENA =====================================
+ * O canvas desenha a arena em 16px lógicos numa escala inteira, mas a arte
+ * do atlas tem quatro vezes essa resolução e o canvas acompanha a densidade
+ * da tela: o CSS só dá o tamanho e deixa o navegador suavizar.
+ * ========================================================================= */
+
+.bomb-canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.bomb-pixel {
+  display: block;
+}
+
+/*
+ * O painel de um jogador, como na referência: a moldura na cor dele, o
+ * retrato, o "P1" e os três corações. A borda externa é a cor do jogador e a
+ * interna é o rim escuro, que é o mesmo chanfro de dois traços das chapas.
+ */
+.bomb-panel {
+  --tint: var(--mark);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 8px;
+  background: #0d0d12;
+  border: var(--stroke) solid var(--tint);
+  box-shadow:
+    inset 0 0 0 2px var(--rim),
+    var(--drop-sm);
+}
+.bomb-panel.is-out {
+  opacity: 0.4;
+  border-style: dashed;
+}
+.bomb-panel.is-me {
+  box-shadow:
+    inset 0 0 0 2px var(--rim),
+    0 0 0 2px var(--paper-hi),
+    var(--drop-sm);
+}
+.bomb-panel-tag {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--tint);
+  text-shadow: 2px 2px 0 var(--rim);
+}
+.bomb-panel-name {
+  font-size: 11px;
+  color: var(--paper-sh);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bomb-timer {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  font-variant-numeric: tabular-nums;
+  color: var(--paper-hi);
+  text-shadow: 2px 2px 0 var(--rim);
+  background: #0d0d12;
+  border: var(--stroke) solid var(--paper-sh);
+  box-shadow:
+    inset 0 0 0 2px var(--rim),
+    var(--drop-sm);
+  padding: 4px 14px;
+}
+.bomb-timer.is-urgent {
+  color: var(--mark);
+  animation: px-blink 1s steps(1, end) infinite;
+}
+
+/* A contagem e o fim da rodada, por cima da arena. */
+.bomb-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  z-index: 40;
+  pointer-events: none;
+}
+.bomb-overlay > * {
+  pointer-events: auto;
+}
+.bomb-count {
+  font-size: 64px;
+  font-weight: 700;
+  color: var(--mark);
+  text-shadow: 4px 4px 0 var(--rim);
+}
+
+/* ---- o direcional na tela ------------------------------------------------ */
+
+.bomb-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 56px);
+  grid-template-rows: repeat(3, 56px);
+  gap: 2px;
+  touch-action: none;
+}
+.bomb-pad-key {
+  font: inherit;
+  font-size: 20px;
+  color: var(--paper);
+  background: var(--slab-hi);
+  border: var(--stroke) solid var(--rim);
+  box-shadow: var(--bevel), var(--drop-sm);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.bomb-pad-key.is-down {
+  transform: translate(2px, 2px);
+  box-shadow: var(--bevel);
+  background: var(--gloss);
+}
+.bomb-fire {
+  font: inherit;
+  width: 88px;
+  height: 88px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--mark);
+  border: var(--stroke) solid var(--rim);
+  box-shadow:
+    inset 2px 2px 0 var(--mark-hi),
+    inset -2px -2px 0 var(--mark-sh),
+    var(--drop);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.bomb-fire.is-down {
+  transform: translate(2px, 2px);
+  box-shadow:
+    inset 2px 2px 0 var(--mark-hi),
+    inset -2px -2px 0 var(--mark-sh);
+}
+
+/* ---- movimento reduzido -------------------------------------------------- */
+
+.motion-off {
+  .px-caret,
+  .px-btn-urgent,
+  .px-pop,
+  .px-btn-urgent.px-pop,
+  .bomb-timer.is-urgent {
+    animation: none;
+  }
+}
