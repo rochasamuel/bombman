@@ -12,8 +12,8 @@ export type Sample = { t: number; x: number; y: number };
 
 /**
  * Dois patches de atraso (a ~30 Hz): sempre há uma amostra à frente para
- * interpolar. Vale para os OUTROS bonecos e as bombas chutadas; o próprio
- * boneco não espera nada, é previsto (`predict.ts`).
+ * interpolar. Vale para todos os bonecos, o próprio inclusive (não há
+ * previsão: a tela desenha só o que o servidor confirmou), e as bombas chutadas.
  */
 export const DELAY_MS = 70;
 /** Quantas amostras guardar; sobra para um patch atrasado. */

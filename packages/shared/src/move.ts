@@ -3,10 +3,8 @@ import { BASE_SPEED, DOWN, LEFT, RIGHT, SPEED_STEP, UP, type Curse, type Directi
 /*
  * O andar em trilhos, sem nada em volta: só a posição, a direção do dedo, a
  * distância do passo e uma pergunta — "esta célula está fechada para mim?".
- * O motor (`BombGame`) anda com isto, e a tela também, para mover o PRÓPRIO
- * boneco na hora em que o dedo aperta, sem esperar o servidor (a previsão,
- * ver `apps/web/src/game/predict.ts`). As duas pontas rodam a mesma regra, e
- * por isso o servidor quase nunca precisa corrigir a tela.
+ * O motor (`BombGame`) anda com isto; a tela não prevê nada, desenha só o
+ * que o servidor confirmou.
  *
  * O personagem só anda na horizontal centrado na linha, e vice-versa. Fora
  * do centro, o passo vira um deslize até o corredor mais perto que esteja

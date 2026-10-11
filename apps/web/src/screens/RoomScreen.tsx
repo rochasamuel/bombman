@@ -41,7 +41,6 @@ export function RoomScreen({ code }: { code: string }) {
         <Arena
           state={state}
           live={connection.live}
-          rtt={connection.rtt}
           sessionId={connection.sessionId}
           actions={connection.actions}
           onFx={connection.onFx}

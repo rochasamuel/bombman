@@ -18,8 +18,6 @@ type Props = {
   state: ArenaState;
   /** O estado vivo, para o canvas. Nulo na arena de mentira do /mock. */
   live: RoomConnection["live"];
-  /** A ida e volta ao servidor; sem ela (o /mock), zero. */
-  rtt?: RoomConnection["rtt"];
   sessionId: string;
   actions: RoomConnection["actions"];
   onFx?: RoomConnection["onFx"];
@@ -34,7 +32,7 @@ checkSprites();
  * redesenha por `requestAnimationFrame` lendo o estado vivo; o React só
  * redesenha o que está em volta, quando o retrato muda.
  */
-export function Arena({ state, live, rtt, sessionId, actions, onFx, onEmote, onExit }: Props) {
+export function Arena({ state, live, sessionId, actions, onFx, onEmote, onExit }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<ArenaRenderer | null>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -51,12 +49,7 @@ export function Arena({ state, live, rtt, sessionId, actions, onFx, onEmote, onE
 
   const me = state.players.find((p) => p.id === sessionId);
   const playing = state.phase === "playing" && !!me?.alive;
-  // A bomba aparece na hora, na célula em que o boneco está desenhado, e essa célula vai ao servidor.
-  const predictedActions = useMemo(
-    () => ({ ...actions, bomb: () => actions.bomb(rendererRef.current?.placeBomb(performance.now()) ?? null) }),
-    [actions],
-  );
-  const controls = useInput(predictedActions, playing);
+  const controls = useInput(actions, playing);
 
   /** O tamanho da arena desta rodada, em pixels lógicos: a câmera enquadra o que o servidor mandou. */
   const { cols, rows } = state;
@@ -104,8 +97,6 @@ export function Arena({ state, live, rtt, sessionId, actions, onFx, onEmote, onE
     const canvas = canvasRef.current;
     if (!canvas) return;
     const renderer = (rendererRef.current ??= new ArenaRenderer(canvas));
-    // O próprio boneco anda na hora, com a direção que vai para o servidor.
-    renderer.setLocal(sessionId, controls.current, rtt);
     renderer.fit(scale, cols, rows);
     let handle = 0;
     const loop = (now: number) => {
@@ -115,7 +106,7 @@ export function Arena({ state, live, rtt, sessionId, actions, onFx, onEmote, onE
     };
     handle = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(handle);
-  }, [live, rtt, scale, cols, rows, sessionId, controls]);
+  }, [live, scale, cols, rows]);
 
   /* Os sons seguem os eventos, não o estado. */
   useEffect(() => {
