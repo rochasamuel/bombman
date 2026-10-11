@@ -337,6 +337,44 @@ describe("a bomba", () => {
   });
 });
 
+describe("a bomba pedida numa célula (a da tela)", () => {
+  it("cai na célula pedida se o corpo do boneco ainda a toca, e ele passa por ela até sair de cima", () => {
+    const game = open();
+    const me = game.players[0];
+    // Andou para a direita: o centro já está na célula 2, mas o corpo ainda toca a 1.
+    me.x = 2.2;
+    me.y = 1.5;
+    game.requestBomb(me.id, { cx: 1, cy: 1 });
+    game.tick(16);
+    expect(game.bombs).toHaveLength(1);
+    expect(game.bombs[0]).toMatchObject({ cx: 1, cy: 1 });
+    expect(game.bombs[0].passers.has(me.id)).toBe(true);
+    // Andando, enquanto ainda toca, continua passando; saindo de cima, a bomba fecha.
+    game.setInput(me.id, 1, 0);
+    game.tick(16);
+    expect(game.bombs[0].passers.has(me.id)).toBe(true);
+    run(game, 200);
+    expect(me.x).toBeGreaterThan(2.5);
+    expect(game.bombs[0].passers.has(me.id)).toBe(false);
+  });
+
+  it("uma célula que o corpo não toca não vale: a bomba cai na célula do boneco", () => {
+    const game = open();
+    const me = game.players[0];
+    me.x = 3.5;
+    me.y = 1.5;
+    game.requestBomb(me.id, { cx: 1, cy: 1 });
+    game.tick(16);
+    expect(game.bombs[0]).toMatchObject({ cx: 3, cy: 1 });
+    // Nem fora da arena, nem na muralha.
+    game.bombs.length = 0;
+    me.x = 1.3;
+    game.requestBomb(me.id, { cx: 0, cy: 1 });
+    game.tick(16);
+    expect(game.bombs[0]).toMatchObject({ cx: 1, cy: 1 });
+  });
+});
+
 describe("o chute", () => {
   /** O jogador 1 põe uma bomba em (2,1) e volta para (1,1), de frente para ela. */
   function bombAhead(game: BombGame) {

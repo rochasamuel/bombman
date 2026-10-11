@@ -98,6 +98,8 @@ export type GamePlayer = {
   input: { dx: number; dy: number };
   /** Um pedido de bomba, consumido no tick seguinte. */
   wantsBomb: boolean;
+  /** A célula em que a tela de quem joga desenhou a bomba (ver `requestBomb`). */
+  bombAt?: { cx: number; cy: number } | null;
 };
 
 export type Bomb = {
@@ -134,6 +136,14 @@ const DROP_WEIGHTS = [36, 34, 20, 6, 4, 10];
  * precisaria olhar duas células adiante.
  */
 const MAX_STEP_MS = 50;
+
+/**
+ * O corpo do boneco (uma célula de lado, centrada nele) toca a célula? Toca
+ * enquanto o centro está a menos de uma célula do centro dela nos dois eixos.
+ */
+export function touches(player: { x: number; y: number }, cx: number, cy: number): boolean {
+  return Math.abs(player.x - (cx + 0.5)) < 1 - 1e-6 && Math.abs(player.y - (cy + 0.5)) < 1 - 1e-6;
+}
 
 export class BombGame {
   players: GamePlayer[] = [];
@@ -347,9 +357,18 @@ export class BombGame {
     player.input.dy = Math.sign(Number(dy) || 0);
   }
 
-  requestBomb(id: string) {
+  /**
+   * Pede uma bomba. A tela de quem joga desenha o próprio boneco à frente do
+   * servidor (a previsão) e mostra a bomba na hora, na célula em que ELA o
+   * vê; essa célula vem junto, e vale se o corpo do boneco ainda a toca
+   * aqui. Senão, vale a célula em que o boneco está.
+   */
+  requestBomb(id: string, at?: { cx: number; cy: number } | null) {
     const player = this.players.find((p) => p.id === id);
-    if (player) player.wantsBomb = true;
+    if (!player) return;
+    player.wantsBomb = true;
+    const ok = at && Number.isInteger(at.cx) && Number.isInteger(at.cy);
+    player.bombAt = ok ? { cx: at.cx, cy: at.cy } : null;
   }
 
   /* --------------------------------------------------------------- o tick */
@@ -412,7 +431,8 @@ export class BombGame {
     if (player.curse === "diarrhea") player.wantsBomb = true;
     if (player.wantsBomb) {
       player.wantsBomb = false;
-      this.placeBomb(player);
+      this.placeBomb(player, player.bombAt);
+      player.bombAt = null;
     }
 
     const { dx, dy } = player.input;
@@ -496,7 +516,7 @@ export class BombGame {
     const cx = Math.floor(player.x);
     const cy = Math.floor(player.y);
     for (const bomb of this.bombs) {
-      if (bomb.passers.has(player.id) && (bomb.cx !== cx || bomb.cy !== cy)) {
+      if (bomb.passers.has(player.id) && (bomb.cx !== cx || bomb.cy !== cy) && !touches(player, bomb.cx, bomb.cy)) {
         bomb.passers.delete(player.id);
       }
     }
@@ -539,19 +559,22 @@ export class BombGame {
 
   /* --------------------------------------------------------------- bombas */
 
-  placeBomb(player: GamePlayer): boolean {
+  placeBomb(player: GamePlayer, at?: { cx: number; cy: number } | null): boolean {
     if (!player.alive || this.phase !== "playing") return false;
-    const cx = Math.floor(player.x);
-    const cy = Math.floor(player.y);
+    // A célula pedida vale se é chão e o corpo do boneco ainda a toca; senão, a dele.
+    const asked =
+      at && touches(player, at.cx, at.cy) && at.cx >= 0 && at.cy >= 0 && at.cx < this.cols && at.cy < this.rows &&
+      this.grid[this.index(at.cx, at.cy)] === FLOOR;
+    const cx = asked ? at.cx : Math.floor(player.x);
+    const cy = asked ? at.cy : Math.floor(player.y);
     if (this.bombAt(cx, cy)) return false;
     const mine = this.bombs.filter((b) => b.owner === player.id).length;
     if (mine >= player.bombs) return false;
 
+    // Quem o corpo toca a célula passa por ela até sair de cima (`leaveBombs`).
     const passers = new Set<string>();
     for (const other of this.players) {
-      if (other.alive && Math.floor(other.x) === cx && Math.floor(other.y) === cy) {
-        passers.add(other.id);
-      }
+      if (other.alive && touches(other, cx, cy)) passers.add(other.id);
     }
     this.bombs.push({
       id: `b${this.nextBombId++}`,

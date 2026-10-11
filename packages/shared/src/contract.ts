@@ -239,6 +239,10 @@ export type JoinRoomOptions = {
 
 /** cliente -> servidor: a direção do dedo. Zero nos dois é parado. */
 export type InputMessage = { dx: number; dy: number };
+/** cliente -> servidor: uma bomba, na célula em que a tela a mostrou (o servidor confere que o boneco ainda a toca). */
+export type BombMessage = { cx?: number; cy?: number };
+/** cliente <-> servidor: a medida da ida e volta. O servidor devolve o `t` como veio. */
+export type PingMessage = { t: number };
 /** host -> servidor: o tamanho da arena. A planta é sorteada pelo servidor entre as do tamanho, a cada rodada. */
 export type ArenaMessage = { size: string };
 /** host -> servidor: o tempo da próxima rodada, em minutos (um de `MATCH_MINUTES`, respeitando o mínimo da arena). */

@@ -112,7 +112,9 @@ export class ArenaRenderer {
   private rows = 0;
   private canvas: HTMLCanvasElement;
   /** Quem joga nesta tela e a direção do dedo dele: o boneco dele é previsto (ver `predict.ts`). */
-  private local: { id: string; input: () => readonly [number, number] } | null = null;
+  private local: { id: string; input: () => readonly [number, number]; rtt: () => number } | null = null;
+  /** O último estado desenhado: a bomba prevista se põe sobre ele. */
+  private lastState: ArenaState | null = null;
   private predictor = new Predictor();
   private lastNow = 0;
   /** Onde o próprio boneco foi desenhado no quadro anterior: para o passo da caminhada. */
@@ -149,9 +151,19 @@ export class ArenaRenderer {
   }
 
   /** Liga a previsão do boneco de `id`, que anda com a direção que `input` devolve. */
-  setLocal(id: string, input: () => readonly [number, number]) {
+  setLocal(id: string, input: () => readonly [number, number], rtt: () => number = () => 0) {
     if (this.local?.id !== id) this.predictor.reset();
-    this.local = { id, input };
+    this.local = { id, input, rtt };
+  }
+
+  /**
+   * O dedo pediu bomba: ela aparece na hora, na célula em que o boneco está
+   * desenhado. Devolve essa célula, para ir junto ao servidor (`null`: o
+   * pedido vai sem célula, e o servidor decide).
+   */
+  placeBomb(now: number): { cx: number; cy: number } | null {
+    if (!this.local || !this.lastState) return null;
+    return this.predictor.placeBomb(this.lastState, this.local.id, now);
   }
 
   draw(state: ArenaState | null, now: number) {
@@ -173,6 +185,7 @@ export class ArenaRenderer {
     ctx.translate(MARGIN, MARGIN);
 
     if (!state || state.grid.length !== cols * rows) return;
+    this.lastState = state;
     // O tema é só desenho: a mesma planta, com as peças do tileset escolhido.
     const theme = themeArt(state.themeId);
     this.drawGrid(ctx, state, theme);
@@ -331,6 +344,8 @@ export class ArenaRenderer {
   private layPowerups(layer: Drawable[], state: ArenaState, now: number) {
     const step = itemStep(now);
     for (const drop of state.powerups) {
+      // O item que o próprio boneco acabou de pegar some na hora (ver `predict.ts`).
+      if (this.predictor.isTaken(drop.cx, drop.cy)) continue;
       // O item flutua devagar, cada um na sua fase, para a arena não ficar parada.
       const bob = Math.sin(now / 350 + drop.cx * 1.3 + drop.cy * 0.7);
       const frame = art.powerup(drop.kind, step);
@@ -340,8 +355,12 @@ export class ArenaRenderer {
 
   private layBombs(layer: Drawable[], state: ArenaState, now: number) {
     const alive = new Set<string>();
+    const ghosts = this.predictor.ghosts;
     for (const bomb of state.bombs) {
       alive.add(bomb.id);
+      // A bomba que já aparecia prevista continua o pavio de onde estava.
+      const ghost = ghosts.find((g) => g.cx === bomb.cx && g.cy === bomb.cy);
+      if (ghost && !this.bombSeen.has(bomb.id)) this.bombSeen.set(bomb.id, ghost.at);
       // O pavio queima desde que a tela viu a bomba; o pulso e o estouro vêm no fim do fuso.
       const { phase, step } = bombFrame(now - this.firstSeen(this.bombSeen, bomb.id, now));
       const frame = art.bomb(phase, step, bomb.pierce);
@@ -354,6 +373,17 @@ export class ArenaRenderer {
       const { x, y } = sampleAt(trail, now - DELAY_MS);
       const foot = (y + 0.5) * TILE;
       layer.push({ y: foot, rank: BOMB, draw: (ctx) => blit(ctx, frame, x * TILE - w / 2, foot - h) });
+    }
+    // As bombas previstas, que o servidor ainda não mandou.
+    for (const ghost of ghosts) {
+      if (state.bombs.some((b) => b.cx === ghost.cx && b.cy === ghost.cy)) continue;
+      const me = this.local ? state.players.find((p) => p.id === this.local!.id) : undefined;
+      const { phase, step } = bombFrame(now - ghost.at);
+      const frame = art.bomb(phase, step, !!me?.pierce);
+      const w = art.logicalWidth(frame);
+      const h = art.logicalHeight(frame);
+      const foot = (ghost.cy + 1) * TILE;
+      layer.push({ y: foot, rank: BOMB, draw: (ctx) => blit(ctx, frame, (ghost.cx + 0.5) * TILE - w / 2, foot - h) });
     }
     forget(this.bombSeen, alive);
     forget(this.bombTrails, alive);
@@ -396,7 +426,8 @@ export class ArenaRenderer {
       if (this.local && player.id === this.local.id) {
         // O próprio boneco: a previsão, na hora, em vez do servidor de 100 ms atrás.
         const [dx, dy] = this.local.input();
-        const predicted = this.predictor.step(state, player.id, dx, dy, dt);
+        this.predictor.rtt = this.local.rtt();
+        const predicted = this.predictor.step(state, player.id, dx, dy, dt, now);
         if (predicted) {
           moved = Math.hypot(predicted.x - this.ownX, predicted.y - this.ownY);
           puppet.x = predicted.x;

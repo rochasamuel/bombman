@@ -165,7 +165,7 @@ function MockMatch({
         if (themeById(id)) themeRef.current = id;
       },
       input: (dx, dy) => game.setInput(ME, dx, dy),
-      bomb: () => game.requestBomb(ME),
+      bomb: (at) => game.requestBomb(ME, at),
       emote: (emote) => {
         for (const handler of emoteHandlers.current) handler({ by: ME, emote });
       },

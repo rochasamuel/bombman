@@ -10,6 +10,8 @@ import {
   isArenaSize,
   isEmote,
   type ArenaMessage,
+  type BombMessage,
+  type PingMessage,
   pickArena,
   type ThemeMessage,
   themeById,
@@ -70,7 +72,18 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
     },
 
     /** Um pedido de bomba. É evento e não estado: segurar a tecla não repete. */
-    bomb: (client: Client) => this.game.requestBomb(client.sessionId),
+    bomb: (client: Client, message?: BombMessage) => {
+      const cx = Number(message?.cx);
+      const cy = Number(message?.cy);
+      const at = Number.isInteger(cx) && Number.isInteger(cy) ? { cx, cy } : null;
+      this.game.requestBomb(client.sessionId, at);
+    },
+
+    /** A tela mede a ida e volta para a previsão do próprio boneco: devolve o `t` como veio. */
+    ping: (client: Client, message: PingMessage) => {
+      const t = Number(message?.t);
+      if (Number.isFinite(t)) client.send("pong", { t } satisfies PingMessage);
+    },
 
     resync: (client: Client) => this.resync(client),
 

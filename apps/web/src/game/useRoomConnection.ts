@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Room } from "@colyseus/sdk";
 import type {
   ArenaMessage,
+  BombMessage,
+  PingMessage,
   ThemeMessage,
   TimeMessage,
   ArenaSize,
@@ -37,7 +39,8 @@ export type RoomActions = {
   theme: (themeId: string) => void;
   /** A direção do dedo. Zero nos dois é parado. */
   input: (dx: number, dy: number) => void;
-  bomb: () => void;
+  /** Uma bomba, na célula em que a tela a mostrou (se mostrou). */
+  bomb: (at?: { cx: number; cy: number } | null) => void;
   emote: (emote: Emote) => void;
   restart: () => void;
 };
@@ -54,6 +57,8 @@ export type RoomConnection = {
    * por render nenhum.
    */
   live: () => ArenaState | null;
+  /** A ida e volta ao servidor, em ms (suavizada): a previsão do próprio boneco usa. */
+  rtt: () => number;
   sessionId: string;
   join: (playerName: string) => Promise<void>;
   retry: () => void;
@@ -65,6 +70,7 @@ export type RoomConnection = {
 
 export function useRoomConnection(code: string): RoomConnection {
   const roomRef = useRef<Room | null>(null);
+  const rttRef = useRef(0);
   const fxHandlers = useRef(new Set<(events: FxEvent[]) => void>());
   const emoteHandlers = useRef(new Set<(event: EmoteEvent) => void>());
   const busy = useRef(false);
@@ -128,6 +134,11 @@ export function useRoomConnection(code: string): RoomConnection {
       });
       room.onMessage("emote", (event: EmoteEvent) => {
         for (const handler of emoteHandlers.current) handler(event);
+      });
+      // A ida e volta, medida a cada segundo para a previsão do próprio boneco.
+      room.onMessage("pong", ({ t }: PingMessage) => {
+        const sample = performance.now() - t;
+        if (sample >= 0 && sample < 5000) rttRef.current = rttRef.current ? rttRef.current * 0.8 + sample * 0.2 : sample;
       });
       room.onDrop(() => setDropped(true));
       room.onReconnect(() => {
@@ -264,7 +275,7 @@ export function useRoomConnection(code: string): RoomConnection {
         lastInput.current = key;
         roomRef.current?.send("input", { dx, dy } satisfies InputMessage);
       },
-      bomb: () => roomRef.current?.send("bomb"),
+      bomb: (at) => roomRef.current?.send("bomb", (at ?? {}) satisfies BombMessage),
       emote: (emote) => roomRef.current?.send("emote", { emote } satisfies EmoteMessage),
       restart: () => roomRef.current?.send("restart"),
     }),
@@ -288,6 +299,15 @@ export function useRoomConnection(code: string): RoomConnection {
     return () => handlers.delete(handler);
   }, []);
 
+  const rtt = useCallback(() => rttRef.current, []);
+  // O ping: um por segundo enquanto há sala.
+  useEffect(() => {
+    const id = setInterval(() => {
+      roomRef.current?.send("ping", { t: performance.now() } satisfies PingMessage);
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
   return {
     status,
     dropped,
@@ -295,6 +315,7 @@ export function useRoomConnection(code: string): RoomConnection {
     notice,
     state,
     live,
+    rtt,
     sessionId,
     join,
     retry,
