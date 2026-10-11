@@ -24,6 +24,7 @@ import { BACKGROUND, MARGIN, STRETCH } from "../art/scenario";
 import { ornamentsOf, themeArt, type ThemeArt } from "../art/themes";
 import { bombFrame, flameStep, itemStep } from "./fuse";
 import { DELAY_MS, record, sampleAt, type Sample } from "./interp";
+import { Predictor, withPrediction } from "./predict";
 import { idleStep, walkStep } from "./walk";
 
 /*
@@ -110,6 +111,13 @@ export class ArenaRenderer {
   private cols = 0;
   private rows = 0;
   private canvas: HTMLCanvasElement;
+  /** Quem joga nesta tela e a direção do dedo dele: o boneco dele é previsto (ver `predict.ts`). */
+  private local: { id: string; input: () => readonly [number, number] } | null = null;
+  private predictor = new Predictor();
+  private lastNow = 0;
+  /** Onde o próprio boneco foi desenhado no quadro anterior: para o passo da caminhada. */
+  private ownX = 0;
+  private ownY = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -138,6 +146,12 @@ export class ArenaRenderer {
     this.rows = rows;
     this.canvas.width = width;
     this.canvas.height = Math.round(shownH * scale * dpr);
+  }
+
+  /** Liga a previsão do boneco de `id`, que anda com a direção que `input` devolve. */
+  setLocal(id: string, input: () => readonly [number, number]) {
+    if (this.local?.id !== id) this.predictor.reset();
+    this.local = { id, input };
   }
 
   draw(state: ArenaState | null, now: number) {
@@ -373,10 +387,25 @@ export class ArenaRenderer {
   private layPlayers(layer: Drawable[], ctx: CanvasRenderingContext2D, state: ArenaState, now: number) {
     const seen = new Set<string>();
 
-    for (const player of state.players) {
+    const dt = this.lastNow ? Math.max(0, now - this.lastNow) : 0;
+    this.lastNow = now;
+    for (let player of state.players) {
       seen.add(player.id);
       const puppet = this.puppet(player, now);
-      const moved = this.follow(puppet, player, now);
+      let moved = this.follow(puppet, player, now);
+      if (this.local && player.id === this.local.id) {
+        // O próprio boneco: a previsão, na hora, em vez do servidor de 100 ms atrás.
+        const [dx, dy] = this.local.input();
+        const predicted = this.predictor.step(state, player.id, dx, dy, dt);
+        if (predicted) {
+          moved = Math.hypot(predicted.x - this.ownX, predicted.y - this.ownY);
+          puppet.x = predicted.x;
+          puppet.y = predicted.y;
+          player = withPrediction(player, predicted);
+        }
+        this.ownX = puppet.x;
+        this.ownY = puppet.y;
+      }
       if (player.alive) puppet.stride += moved * TILE;
       else puppet.stride = 0;
 

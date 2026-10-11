@@ -34,7 +34,8 @@ const CONSENTED = CloseCode.CONSENTED;
 
 /** Quantas vezes por segundo o motor avança, e de quanto em quanto a tela recebe. */
 const TICK_MS = 1000 / 60;
-const PATCH_MS = 50;
+/** Patches a ~30 Hz: os outros bonecos ficam ~70 ms atrás, em vez de 100 (ver `interp.ts`). */
+const PATCH_MS = 33;
 
 /**
  * A sala: conexões, reconexão, o relógio e o espelho do motor no estado
@@ -284,7 +285,10 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
   private sync() {
     const { game, state } = this;
     state.phase = game.phase;
-    state.timeLeft = Math.round(game.timeLeft);
+    // O relógio vai em segundos inteiros (arredondado para cima, como o painel
+    // mostra): em milissegundos ele mudava a cada tick, e todo patch levava
+    // uma mudança mesmo com todo mundo parado — 30 mensagens por segundo à toa.
+    state.timeLeft = Math.ceil(game.timeLeft / 1000) * 1000;
     state.countdown = game.countdown;
     state.winnerId = game.winnerId;
     state.round = game.round;

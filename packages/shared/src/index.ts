@@ -8,4 +8,5 @@ export * from "./contract.js";
 export * from "./arena.js";
 export * from "./arenas.js";
 export * from "./themes.js";
+export * from "./move.js";
 export * from "./game.js";

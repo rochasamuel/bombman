@@ -37,6 +37,8 @@ export type InputControls = {
   bomb: () => void;
   /** Solta tudo: a aba perdeu o foco, a rodada acabou. */
   clear: () => void;
+  /** A direção que vale agora, como vai para o servidor: o que a previsão usa. */
+  current: () => readonly [number, number];
 };
 
 export function useInput(actions: RoomActions, enabled: boolean): InputControls {
@@ -65,6 +67,10 @@ export function useInput(actions: RoomActions, enabled: boolean): InputControls 
       clear: () => {
         held.current = [];
         send();
+      },
+      current: () => {
+        const top = held.current.at(-1);
+        return top ? VECTOR[top] : [0, 0];
       },
     }),
     [actions, send],

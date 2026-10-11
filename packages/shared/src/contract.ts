@@ -209,7 +209,7 @@ export type ArenaState = {
   bombs: PublicBomb[];
   flames: PublicFlame[];
   powerups: PublicPowerup[];
-  /** Quanto falta da rodada, em ms. */
+  /** Quanto falta da rodada, em ms, em segundos inteiros (arredondado para cima): só muda uma vez por segundo. */
   timeLeft: number;
   /** O "3, 2, 1". Zero fora da contagem. */
   countdown: number;

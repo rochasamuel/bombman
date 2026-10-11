@@ -46,6 +46,7 @@ import {
   type Powerup,
 } from "./contract.js";
 import { ARENA_SIZE_NAME, fillGrid, type ArenaDefinition } from "./arena.js";
+import { moveOnRails, moveSpeed } from "./move.js";
 import { DEFAULT_ARENA } from "./arenas.js";
 
 /**
@@ -127,10 +128,6 @@ const DROP_CHANCE = 0.38;
 /** Os pesos dos itens, na ordem de `POWERUPS`: fogo, bomba, bota, chute, perfurante, caveira. O chute e a perfurante são raros: juntos, menos de um item em dez. */
 const DROP_WEIGHTS = [36, 34, 20, 6, 4, 10];
 
-/** Metade da largura do personagem para o teste de parede. */
-const HALF = 0.5 - 1e-6;
-/** Até onde da linha do corredor o corte de quina ainda puxa. */
-const CORNER_REACH = 0.8;
 /**
  * Maior fatia de tempo que um passo da simulação aceita. Com a bota no máximo
  * (6 células/s) são 0,3 célula: longe da meia célula em que o movimento
@@ -422,125 +419,16 @@ export class BombGame {
     player.moving = dx !== 0 || dy !== 0;
     if (!player.moving) return;
 
-    let speed = BASE_SPEED + player.speed * SPEED_STEP;
-    if (player.curse === "slow") speed = BASE_SPEED * 0.55;
-    const dist = speed * seconds;
-
-    // Com as duas setas apertadas, a vertical vence: é a que mais costuma ser
-    // a nova — quem vinha andando de lado e aperta para cima quer virar.
-    if (dy !== 0) {
-      player.dir = dy > 0 ? DOWN : UP;
-      if (!this.walk(player, 0, dy, dist) && dx !== 0) {
-        player.dir = dx > 0 ? RIGHT : LEFT;
-        this.walk(player, dx, 0, dist);
-      }
-    } else {
-      player.dir = dx > 0 ? RIGHT : LEFT;
-      this.walk(player, dx, 0, dist);
+    const dist = moveSpeed(player.speed, player.curse) * seconds;
+    const { bumped } = moveOnRails(player, dx, dy, dist, (cx, cy) => this.blockedFor(player, cx, cy));
+    // Esbarrou numa bomba com a bota de chute: ela vai.
+    if (bumped && player.kick) {
+      const bomb = this.bombAt(bumped.cx, bumped.cy);
+      if (bomb) this.kick(bomb, bumped.dx, bumped.dy);
     }
 
     this.pickUp(player);
     this.leaveBombs(player);
-  }
-
-  /**
-   * Um passo num eixo. Devolve se o personagem saiu do lugar.
-   *
-   * Para andar na horizontal é preciso estar centrado na linha. Fora do
-   * centro, o passo vira um deslize até o corredor mais perto que esteja
-   * aberto — o corte de quina. Centrado, anda até a parede e para nela.
-   */
-  private walk(player: GamePlayer, dx: number, dy: number, dist: number): boolean {
-    const axis = dx !== 0 ? "x" : "y";
-    const cross = axis === "x" ? "y" : "x";
-    const pos = player[axis];
-    const off = player[cross];
-    const lane = Math.floor(off) + 0.5;
-
-    if (Math.abs(off - lane) > 1e-4) {
-      return this.slide(player, axis, cross, dx || dy, lane, dist);
-    }
-
-    const cell = Math.floor(pos);
-    const step = dx || dy;
-    const ahead = cell + step;
-    const crossCell = Math.floor(off);
-    const blocked =
-      axis === "x"
-        ? this.blockedFor(player, ahead, crossCell)
-        : this.blockedFor(player, crossCell, ahead);
-
-    const target = pos + step * dist;
-    const edge = step > 0 ? cell + 1 - HALF : cell + HALF;
-    if (blocked && (step > 0 ? target > edge : target < edge)) {
-      const moved = Math.abs(edge - pos) > 1e-6;
-      player[axis] = edge;
-      // Esbarrou numa bomba com a bota de chute: ela vai.
-      const bomb = axis === "x" ? this.bombAt(ahead, crossCell) : this.bombAt(crossCell, ahead);
-      if (bomb && player.kick) this.kick(bomb, dx, dy);
-      if (!moved) return this.cutCorner(player, axis, cross, step, dist);
-      return true;
-    }
-    player[axis] = target;
-    return true;
-  }
-
-  /**
-   * Desliza até o corredor. O corredor mais perto primeiro; se ele estiver
-   * fechado, o do outro lado, desde que o personagem já o alcance.
-   */
-  private slide(
-    player: GamePlayer,
-    axis: "x" | "y",
-    cross: "x" | "y",
-    step: number,
-    lane: number,
-    dist: number,
-  ): boolean {
-    const off = player[cross];
-    const cell = Math.floor(player[axis]);
-    const other = off > lane ? lane + 1 : lane - 1;
-    for (const candidate of [lane, other]) {
-      if (Math.abs(candidate - off) > CORNER_REACH) continue;
-      const laneCell = Math.floor(candidate);
-      const open =
-        axis === "x"
-          ? !this.blockedFor(player, cell + step, laneCell)
-          : !this.blockedFor(player, laneCell, cell + step);
-      if (!open) continue;
-      const delta = Math.sign(candidate - off) * Math.min(dist, Math.abs(candidate - off));
-      player[cross] = off + delta;
-      return true;
-    }
-    return false;
-  }
-
-  /**
-   * Parado contra a parede, ainda centrado: se a célula da frente está
-   * fechada mas a diagonal está aberta e o personagem está perto o bastante
-   * dela, ele escorrega para o lado. É o que faz virar uma esquina sem parar.
-   */
-  private cutCorner(
-    player: GamePlayer,
-    axis: "x" | "y",
-    cross: "x" | "y",
-    step: number,
-    dist: number,
-  ): boolean {
-    const cell = Math.floor(player[axis]);
-    const crossCell = Math.floor(player[cross]);
-    for (const side of [-1, 1]) {
-      const open =
-        axis === "x"
-          ? !this.blockedFor(player, cell + step, crossCell + side) &&
-            !this.blockedFor(player, cell, crossCell + side)
-          : !this.blockedFor(player, crossCell + side, cell + step) &&
-            !this.blockedFor(player, crossCell + side, cell);
-      if (!open) continue;
-      player[cross] += side * dist;
-      return true;
-    }
-    return false;
   }
 
   /** A célula está fechada para ESTE jogador. A bomba em que ele ainda está em cima não fecha. */

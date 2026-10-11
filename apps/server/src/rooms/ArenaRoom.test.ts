@@ -113,6 +113,25 @@ describe("a sala", () => {
     expect(room.state.arenaId).toBe(during);
   });
 
+  it("parados, o estado só muda uma vez por segundo: o relógio vai em segundos inteiros", async () => {
+    const { room, clients } = await seated(2);
+    clients[0].send("start");
+    await room.waitForNextPatch();
+    const game = engine(room);
+    game.tick(COUNTDOWN + 10);
+    // Ninguém se mexe: em meio segundo, nada no estado sincronizado muda.
+    const sync = () => (room as unknown as { sync: () => void }).sync();
+    sync();
+    const before = JSON.stringify(room.state.toJSON());
+    const ms = game.timeLeft % 1000;
+    game.tick(Math.max(1, ms - 50));
+    sync();
+    expect(JSON.stringify(room.state.toJSON())).toBe(before);
+    expect(room.state.timeLeft % 1000).toBe(0);
+    expect(room.state.timeLeft).toBeGreaterThanOrEqual(game.timeLeft);
+    expect(room.state.timeLeft - game.timeLeft).toBeLessThan(1000);
+  });
+
   it("sorteia a planta a cada rodada: com o tempo, as três do tamanho aparecem", async () => {
     const { room } = await seated(2);
     const game = engine(room);

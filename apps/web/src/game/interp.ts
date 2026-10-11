@@ -1,6 +1,6 @@
 /*
  * A interpolação de posição. O servidor manda a posição de cada jogador a
- * 20 Hz; entre um patch e outro a tela precisa de um lugar para desenhar o
+ * ~30 Hz; entre um patch e outro a tela precisa de um lugar para desenhar o
  * boneco. Em vez de perseguir a última posição (que chega e espera, dando um
  * tranco a cada patch), a tela guarda as últimas amostras com a hora em que
  * chegaram e desenha o boneco onde ele estava há um atraso fixo, em linha
@@ -10,8 +10,12 @@
 
 export type Sample = { t: number; x: number; y: number };
 
-/** Dois patches de atraso (a 20 Hz): sempre há uma amostra à frente para interpolar. */
-export const DELAY_MS = 100;
+/**
+ * Dois patches de atraso (a ~30 Hz): sempre há uma amostra à frente para
+ * interpolar. Vale para os OUTROS bonecos e as bombas chutadas; o próprio
+ * boneco não espera nada, é previsto (`predict.ts`).
+ */
+export const DELAY_MS = 70;
 /** Quantas amostras guardar; sobra para um patch atrasado. */
 export const SAMPLES = 8;
 /** Um salto maior que isso, em células, é renascimento: não se interpola. */

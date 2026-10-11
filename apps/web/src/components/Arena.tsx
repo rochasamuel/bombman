@@ -97,6 +97,8 @@ export function Arena({ state, live, sessionId, actions, onFx, onEmote, onExit }
     const canvas = canvasRef.current;
     if (!canvas) return;
     const renderer = (rendererRef.current ??= new ArenaRenderer(canvas));
+    // O próprio boneco anda na hora, com a direção que vai para o servidor.
+    renderer.setLocal(sessionId, controls.current);
     renderer.fit(scale, cols, rows);
     let handle = 0;
     const loop = (now: number) => {
@@ -106,7 +108,7 @@ export function Arena({ state, live, sessionId, actions, onFx, onEmote, onExit }
     };
     handle = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(handle);
-  }, [live, scale, cols, rows]);
+  }, [live, scale, cols, rows, sessionId, controls]);
 
   /* Os sons seguem os eventos, não o estado. */
   useEffect(() => {
