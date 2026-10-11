@@ -3,7 +3,6 @@ import {
   BOMB_FUSE,
   BRICK,
   BUSH,
-  COLS,
   COUNTDOWN,
   CURSES,
   CURSE_TIME,
@@ -19,9 +18,14 @@ import {
   FLAME_V,
   FLOOR,
   INVULNERABLE_TIME,
+  KICK_SPEED,
   LEFT,
   LIVES,
   MATCH_TIME,
+  DEFAULT_MATCH_MINUTES,
+  isMatchMinutes,
+  minMinutesFor,
+  type MatchMinutes,
   MAX_BOMBS,
   MAX_PLAYERS,
   MAX_RANGE,
@@ -30,7 +34,6 @@ import {
   POWERUPS,
   RESPAWN_TIME,
   RIGHT,
-  ROWS,
   SPEED_STEP,
   UP,
   WALL,
@@ -42,6 +45,8 @@ import {
   type GamePhase,
   type Powerup,
 } from "./contract.js";
+import { ARENA_SIZE_NAME, fillGrid, type ArenaDefinition } from "./arena.js";
+import { DEFAULT_ARENA } from "./arenas.js";
 
 /**
  * A REGRA do Bombman. Tudo aqui, e nada em lugar nenhum além daqui. Mora no
@@ -81,6 +86,10 @@ export type GamePlayer = {
   bombs: number;
   /** Nível da bota: 0..MAX_SPEED_LEVEL. */
   speed: number;
+  /** Tem a bota de chute. */
+  kick: boolean;
+  /** Tem a perfurante: as bombas dele nascem perfurantes. */
+  pierce: boolean;
   invulnerableUntil: number;
   curse: Curse | "";
   curseUntil: number;
@@ -92,32 +101,31 @@ export type GamePlayer = {
 
 export type Bomb = {
   id: string;
+  /** A célula em que está: sempre o piso de `x` e `y`. */
   cx: number;
   cy: number;
+  /** O centro, em células. Fracionário enquanto desliza chutada. */
+  x: number;
+  y: number;
   owner: string;
   explodeAt: number;
   range: number;
+  /** A explosão atravessa tijolos e bombas (só muralha e pilar a param). */
+  pierce: boolean;
+  /** Para onde desliza, depois de um chute; nulo parada. */
+  sliding: { dx: number; dy: number } | null;
   /** Quem estava em cima quando ela nasceu, e ainda não saiu de cima. */
   passers: Set<string>;
 };
 
-export type Flame = { cx: number; cy: number; kind: number; until: number };
+/** `born` é quando a chama acendeu (ou reacendeu, numa cadeia): a tela recomeça a animação dela. */
+export type Flame = { cx: number; cy: number; kind: number; born: number; until: number };
 export type PowerupDrop = { cx: number; cy: number; kind: Powerup };
 
-/** Os quatro cantos, na ordem das cores. */
-const SPAWNS: ReadonlyArray<readonly [number, number]> = [
-  [1, 1],
-  [COLS - 2, ROWS - 2],
-  [COLS - 2, 1],
-  [1, ROWS - 2],
-];
-
-/** Chance de uma célula livre nascer com bloco. */
-const SOFT_DENSITY = 0.72;
 /** Chance de um bloco destruído deixar um item. */
 const DROP_CHANCE = 0.38;
-/** Os pesos dos itens, na ordem de `POWERUPS`. */
-const DROP_WEIGHTS = [36, 34, 20, 10];
+/** Os pesos dos itens, na ordem de `POWERUPS`: fogo, bomba, bota, chute, perfurante, caveira. O chute e a perfurante são raros: juntos, menos de um item em dez. */
+const DROP_WEIGHTS = [36, 34, 20, 6, 4, 10];
 
 /** Metade da largura do personagem para o teste de parede. */
 const HALF = 0.5 - 1e-6;
@@ -132,7 +140,10 @@ const MAX_STEP_MS = 50;
 
 export class BombGame {
   players: GamePlayer[] = [];
-  grid: number[] = new Array(COLS * ROWS).fill(FLOOR);
+  /** A planta da próxima rodada. Só muda no lobby ou depois do fim (`setArena`). */
+  arena: ArenaDefinition;
+  /** A arena, célula a célula, `cols` por fileira: o que a tela desenha. */
+  grid: number[] = [];
   bombs: Bomb[] = [];
   flames: Flame[] = [];
   powerups: PowerupDrop[] = [];
@@ -140,6 +151,8 @@ export class BombGame {
   /** O relógio da rodada, em ms desde que o motor nasceu. */
   time = 0;
   timeLeft = MATCH_TIME;
+  /** Quanto dura a próxima rodada, em minutos. Só muda no lobby ou depois do fim (`setMatchMinutes`). */
+  matchMinutes: MatchMinutes = DEFAULT_MATCH_MINUTES;
   countdownUntil = 0;
   winnerId = "";
   round = 0;
@@ -149,7 +162,72 @@ export class BombGame {
   private fx: FxEvent[] = [];
   private nextBombId = 1;
 
-  constructor(private random: () => number = Math.random) {}
+  /**
+   * `random` só decide os itens que os blocos deixam; a arena é uma planta
+   * (a da referência, por padrão), igual em toda rodada.
+   */
+  constructor(
+    private random: () => number = Math.random,
+    arena: ArenaDefinition = DEFAULT_ARENA,
+  ) {
+    this.arena = arena;
+    this.buildGrid();
+  }
+
+  get cols() {
+    return this.arena.cols;
+  }
+
+  get rows() {
+    return this.arena.rows;
+  }
+
+  /** A posição de uma célula na grade. */
+  index(cx: number, cy: number) {
+    return cellIndex(cx, cy, this.cols);
+  }
+
+  /**
+   * O host trocou de arena. Vale para a próxima rodada: a grade já vira a
+   * nova, e cada um vai para o seu canto nela, para a tela não mostrar
+   * ninguém dentro de um pilar.
+   */
+  setArena(arena: ArenaDefinition) {
+    if (this.phase === "playing" || this.phase === "countdown") {
+      throw new GameError("A rodada já começou.");
+    }
+    this.arena = arena;
+    // Uma arena maior pede mais tempo: um tempo curto demais para ela sobe para o mínimo.
+    const min = minMinutesFor(arena.size);
+    if (this.matchMinutes < min) this.matchMinutes = min;
+    this.buildGrid();
+    this.bombs = [];
+    this.flames = [];
+    this.powerups = [];
+    for (const player of this.players) this.seat(player);
+  }
+
+  /** O tempo da próxima rodada, em minutos: um da lista, e não menos que o mínimo da arena. */
+  setMatchMinutes(minutes: number) {
+    if (this.phase === "playing" || this.phase === "countdown") {
+      throw new GameError("A rodada já começou.");
+    }
+    if (!isMatchMinutes(minutes)) throw new GameError("Esse tempo não existe.");
+    const min = minMinutesFor(this.arena.size);
+    if (minutes < min) {
+      throw new GameError(`Na arena ${ARENA_SIZE_NAME[this.arena.size].toLowerCase()} o mínimo é ${min} minutos.`);
+    }
+    this.matchMinutes = minutes;
+  }
+
+  /** Põe o jogador no canto dele, parado. */
+  private seat(player: GamePlayer) {
+    const [sx, sy] = this.arena.spawns[player.slot];
+    player.x = sx + 0.5;
+    player.y = sy + 0.5;
+    player.dir = DOWN;
+    player.moving = false;
+  }
 
   /* --------------------------------------------------------------- lobby */
 
@@ -159,7 +237,7 @@ export class BombGame {
       throw new GameError("A rodada já começou.");
     }
     const slot = [0, 1, 2, 3].find((s) => !this.players.some((p) => p.slot === s))!;
-    const [sx, sy] = SPAWNS[slot];
+    const [sx, sy] = this.arena.spawns[slot];
     const player: GamePlayer = {
       id,
       seatKey,
@@ -176,6 +254,8 @@ export class BombGame {
       range: 1,
       bombs: 1,
       speed: 0,
+      kick: false,
+      pierce: false,
       invulnerableUntil: 0,
       curse: "",
       curseUntil: 0,
@@ -225,15 +305,11 @@ export class BombGame {
     this.bombs = [];
     this.flames = [];
     this.powerups = [];
-    this.timeLeft = MATCH_TIME;
+    this.timeLeft = this.matchMinutes * 60_000;
     this.buildGrid();
     for (const player of this.players) {
-      const [sx, sy] = SPAWNS[player.slot];
+      this.seat(player);
       Object.assign(player, {
-        x: sx + 0.5,
-        y: sy + 0.5,
-        dir: DOWN,
-        moving: false,
         alive: true,
         dyingUntil: 0,
         respawnAt: 0,
@@ -241,6 +317,8 @@ export class BombGame {
         range: 1,
         bombs: 1,
         speed: 0,
+        kick: false,
+        pierce: false,
         invulnerableUntil: 0,
         curse: "",
         curseUntil: 0,
@@ -260,35 +338,7 @@ export class BombGame {
   }
 
   private buildGrid() {
-    const grid = this.grid;
-    for (let cy = 0; cy < ROWS; cy++) {
-      for (let cx = 0; cx < COLS; cx++) {
-        const border = cx === 0 || cy === 0 || cx === COLS - 1 || cy === ROWS - 1;
-        const pillar = cx % 2 === 0 && cy % 2 === 0;
-        grid[cellIndex(cx, cy)] = border || pillar ? WALL : FLOOR;
-      }
-    }
-    // Os cantos e as duas células vizinhas ficam livres: ninguém nasce murado.
-    const reserved = new Set<number>();
-    for (const [sx, sy] of SPAWNS) {
-      for (const [dx, dy] of [
-        [0, 0],
-        [1, 0],
-        [-1, 0],
-        [0, 1],
-        [0, -1],
-        [2, 0],
-        [-2, 0],
-        [0, 2],
-        [0, -2],
-      ]) {
-        reserved.add(cellIndex(sx + dx, sy + dy));
-      }
-    }
-    for (let i = 0; i < grid.length; i++) {
-      if (grid[i] !== FLOOR || reserved.has(i)) continue;
-      if (this.random() < SOFT_DENSITY) grid[i] = this.random() < 0.55 ? BRICK : BUSH;
-    }
+    fillGrid(this.grid, this.arena);
   }
 
   /* --------------------------------------------------------------- entrada */
@@ -345,7 +395,7 @@ export class BombGame {
     for (const player of this.players) {
       this.tickPlayer(player, seconds);
     }
-    this.tickBombs();
+    this.tickBombs(seconds);
     this.tickFlames();
     this.tickDeaths();
     this.checkEnd();
@@ -425,6 +475,9 @@ export class BombGame {
     if (blocked && (step > 0 ? target > edge : target < edge)) {
       const moved = Math.abs(edge - pos) > 1e-6;
       player[axis] = edge;
+      // Esbarrou numa bomba com a bota de chute: ela vai.
+      const bomb = axis === "x" ? this.bombAt(ahead, crossCell) : this.bombAt(crossCell, ahead);
+      if (bomb && player.kick) this.kick(bomb, dx, dy);
       if (!moved) return this.cutCorner(player, axis, cross, step, dist);
       return true;
     }
@@ -492,14 +545,63 @@ export class BombGame {
 
   /** A célula está fechada para ESTE jogador. A bomba em que ele ainda está em cima não fecha. */
   private blockedFor(player: GamePlayer, cx: number, cy: number): boolean {
-    if (cx < 0 || cy < 0 || cx >= COLS || cy >= ROWS) return true;
-    if (this.grid[cellIndex(cx, cy)] !== FLOOR) return true;
+    if (cx < 0 || cy < 0 || cx >= this.cols || cy >= this.rows) return true;
+    if (this.grid[this.index(cx, cy)] !== FLOOR) return true;
     const bomb = this.bombAt(cx, cy);
     return !!bomb && !bomb.passers.has(player.id);
   }
 
   bombAt(cx: number, cy: number) {
     return this.bombs.find((b) => b.cx === cx && b.cy === cy);
+  }
+
+  /** A célula está livre para uma bomba entrar deslizando: chão, sem bomba e sem ninguém de pé. */
+  private freeForBomb(cx: number, cy: number): boolean {
+    if (cx < 0 || cy < 0 || cx >= this.cols || cy >= this.rows) return false;
+    if (this.grid[this.index(cx, cy)] !== FLOOR) return false;
+    if (this.bombAt(cx, cy)) return false;
+    return !this.players.some((p) => p.alive && Math.floor(p.x) === cx && Math.floor(p.y) === cy);
+  }
+
+  /** O chute: a bomba sai deslizando, se a célula seguinte estiver livre. Quem estava em cima já não está. */
+  private kick(bomb: Bomb, dx: number, dy: number) {
+    if (bomb.sliding) return;
+    if (!this.freeForBomb(bomb.cx + dx, bomb.cy + dy)) return;
+    bomb.sliding = { dx, dy };
+    bomb.passers.clear();
+  }
+
+  /**
+   * A bomba chutada anda de centro em centro: em cada centro olha a célula
+   * seguinte e, se ela não estiver livre, para ali mesmo, encaixada.
+   */
+  private slideBomb(bomb: Bomb, seconds: number) {
+    if (!bomb.sliding) return;
+    const { dx, dy } = bomb.sliding;
+    const axis = dx !== 0 ? "x" : "y";
+    const dir = dx || dy;
+    let left = KICK_SPEED * seconds;
+    while (left > 1e-9) {
+      const cell = axis === "x" ? bomb.cx : bomb.cy;
+      const center = cell + 0.5;
+      const ahead = (center - bomb[axis]) * dir;
+      if (ahead > 1e-9) {
+        // Ainda antes do centro desta célula: vai até ele.
+        const move = Math.min(left, ahead);
+        bomb[axis] += dir * move;
+        left -= move;
+      } else if (this.freeForBomb(bomb.cx + dx, bomb.cy + dy)) {
+        const move = Math.min(left, (cell + dir + 0.5 - bomb[axis]) * dir);
+        bomb[axis] += dir * move;
+        left -= move;
+        bomb.cx = Math.floor(bomb.x);
+        bomb.cy = Math.floor(bomb.y);
+      } else {
+        bomb[axis] = center;
+        bomb.sliding = null;
+        return;
+      }
+    }
   }
 
   private leaveBombs(player: GamePlayer) {
@@ -533,6 +635,12 @@ export class BombGame {
       case "boot":
         player.speed = Math.min(MAX_SPEED_LEVEL, player.speed + 1);
         break;
+      case "kick":
+        player.kick = true;
+        break;
+      case "pierce":
+        player.pierce = true;
+        break;
       case "skull": {
         player.curse = CURSES[Math.floor(this.random() * CURSES.length)];
         player.curseUntil = this.time + CURSE_TIME;
@@ -561,16 +669,21 @@ export class BombGame {
       id: `b${this.nextBombId++}`,
       cx,
       cy,
+      x: cx + 0.5,
+      y: cy + 0.5,
       owner: player.id,
       explodeAt: this.time + BOMB_FUSE,
       range: player.curse === "weak" ? 1 : player.range,
+      pierce: player.pierce,
+      sliding: null,
       passers,
     });
     this.fx.push({ k: "place", by: player.id });
     return true;
   }
 
-  private tickBombs() {
+  private tickBombs(seconds: number) {
+    for (const bomb of this.bombs) this.slideBomb(bomb, seconds);
     // Uma de cada vez, e sempre a partir da lista viva: uma explosão pode
     // detonar outra, e a outra entra na mesma volta.
     for (;;) {
@@ -596,22 +709,25 @@ export class BombGame {
       for (let i = 1; i <= bomb.range; i++) {
         const cx = bomb.cx + dx * i;
         const cy = bomb.cy + dy * i;
-        const cell = this.grid[cellIndex(cx, cy)];
+        const cell = this.grid[this.index(cx, cy)];
         if (cell === WALL) break;
-        const last = i === bomb.range;
+        // A ponta vai na última célula do braço: pelo alcance, ou porque a seguinte é muralha ou pilar.
+        const last = i === bomb.range || this.grid[this.index(cx + dx, cy + dy)] === WALL;
         if (isSoft(cell)) {
           // O bloco queima e segura o braço: a chama entra nele e não passa.
-          this.grid[cellIndex(cx, cy)] = FLOOR;
-          this.burn(cx, cy, end, until);
+          // A perfurante atravessa: queima e segue até o alcance.
+          this.grid[this.index(cx, cy)] = FLOOR;
+          this.burn(cx, cy, last || !bomb.pierce ? end : mid, until);
           this.drop(cx, cy);
-          break;
+          if (!bomb.pierce) break;
+          continue;
         }
         this.burn(cx, cy, last ? end : mid, until);
         const other = this.bombAt(cx, cy);
         if (other) {
-          // A chama alcança outra bomba: ela explode agora.
+          // A chama alcança outra bomba: ela explode agora. A perfurante segue adiante.
           other.explodeAt = this.time;
-          break;
+          if (!bomb.pierce) break;
         }
       }
     }
@@ -620,12 +736,13 @@ export class BombGame {
   private burn(cx: number, cy: number, kind: number, until: number) {
     const existing = this.flames.find((f) => f.cx === cx && f.cy === cy);
     if (existing) {
+      existing.born = this.time;
       existing.until = until;
       // Duas chamas na mesma célula: vira um centro, que desenha para os
       // quatro lados — é o que uma cruzada de braços parece.
       if (existing.kind !== kind) existing.kind = FLAME_CENTER;
     } else {
-      this.flames.push({ cx, cy, kind, until });
+      this.flames.push({ cx, cy, kind, born: this.time, until });
     }
     // Um item na chama vira cinza.
     this.powerups = this.powerups.filter((p) => p.cx !== cx || p.cy !== cy);
@@ -664,6 +781,9 @@ export class BombGame {
     player.moving = false;
     player.lives -= 1;
     player.curse = "";
+    // A morte leva o chute e a perfurante; fogo, bombas e bota ficam.
+    player.kick = false;
+    player.pierce = false;
     player.dyingUntil = this.time + DEATH_TIME;
     player.respawnAt = player.lives > 0 ? this.time + RESPAWN_TIME : 0;
     this.fx.push({ k: "die", who: player.id });
@@ -675,10 +795,8 @@ export class BombGame {
   }
 
   private respawn(player: GamePlayer) {
-    const [sx, sy] = SPAWNS[player.slot];
-    player.x = sx + 0.5;
-    player.y = sy + 0.5;
-    player.dir = DOWN;
+    const [sx, sy] = this.arena.spawns[player.slot];
+    this.seat(player);
     player.alive = true;
     player.respawnAt = 0;
     player.invulnerableUntil = this.time + INVULNERABLE_TIME;

@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SLOT_COLORS, type ArenaState, type FxEvent } from "@bomb/shared";
 import { checkSprites } from "../art/atlas";
-import { ArenaRenderer, VIEW_H, VIEW_W } from "../game/render";
+import { ArenaRenderer, fitScale, viewOf } from "../game/render";
 import { useEmotes } from "../game/useEmotes";
 import { useInput } from "../game/useInput";
 import type { RoomConnection } from "../game/useRoomConnection";
@@ -11,7 +11,6 @@ import { useUi } from "../store/ui";
 import { ConfigMenu } from "./ConfigMenu";
 import { EmotePicker } from "./EmotePicker";
 import { Hud } from "./Hud";
-import { SystemLog } from "./SystemLog";
 import { TouchPad } from "./TouchPad";
 
 type Props = {
@@ -52,31 +51,53 @@ export function Arena({ state, live, sessionId, actions, onFx, onEmote, onExit }
   const playing = state.phase === "playing" && !!me?.alive;
   const controls = useInput(actions, playing);
 
-  /* A escala é inteira e a maior que cabe; o canvas em si segue a densidade da tela. */
+  /** O tamanho da arena desta rodada, em pixels lógicos: a câmera enquadra o que o servidor mandou. */
+  const { cols, rows } = state;
+  const view = useMemo(() => viewOf(cols, rows), [cols, rows]);
+
+  /* A escala é a maior que cabe na JANELA, em quartos (2, 2,25, 2,5…): só o
+   * canvas cresce; o painel e os controles ficam na largura da página, e o
+   * canvas passa deles pelos dois lados, centrado. Na altura, a tela inteira
+   * tem de caber sem rolar: o que sobra para o canvas é a janela menos o que
+   * está em volta dele (o cabeçalho, o painel, os controles, os vãos e a
+   * margem da página), MEDIDO, não estimado — o painel muda de altura com os
+   * jogadores, e o direcional na tela é bem mais alto que a dica. Uma arena
+   * menor é um canvas menor, que cabe numa escala maior: a célula nunca muda
+   * de tamanho lógico, só o quanto a tela a amplia. O canvas em si segue a
+   * densidade da tela, e o desenho arredonda cada borda ao pixel. */
   useEffect(() => {
     const frame = frameRef.current;
-    if (!frame) return;
+    const main = frame?.parentElement;
+    if (!frame || !main) return;
     const fit = () => {
-      const width = frame.clientWidth;
-      const height = window.innerHeight - 200;
-      const next = Math.max(1, Math.min(4, Math.floor(Math.min(width / VIEW_W, height / VIEW_H))));
-      setScale(next);
+      const style = getComputedStyle(main);
+      let around = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+      let siblings = 0;
+      for (const child of main.children) {
+        if (child === frame) continue;
+        around += (child as HTMLElement).offsetHeight;
+        siblings++;
+      }
+      around += siblings * parseFloat(style.rowGap || "0");
+      const width = document.documentElement.clientWidth - 24;
+      setScale(fitScale(width, window.innerHeight - around, view));
     };
     fit();
+    // O que está em volta muda de tamanho (o painel, o direcional): mede de novo.
     const observer = new ResizeObserver(fit);
-    observer.observe(frame);
+    for (const child of main.children) if (child !== frame) observer.observe(child);
     addEventListener("resize", fit);
     return () => {
       observer.disconnect();
       removeEventListener("resize", fit);
     };
-  }, []);
+  }, [showPad, view]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const renderer = (rendererRef.current ??= new ArenaRenderer(canvas));
-    renderer.setScale(scale);
+    renderer.fit(scale, cols, rows);
     let handle = 0;
     const loop = (now: number) => {
       // O estado vivo primeiro; o retrato é a reserva do /mock, que não tem um.
@@ -85,7 +106,7 @@ export function Arena({ state, live, sessionId, actions, onFx, onEmote, onExit }
     };
     handle = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(handle);
-  }, [live, scale]);
+  }, [live, scale, cols, rows]);
 
   /* Os sons seguem os eventos, não o estado. */
   useEffect(() => {
@@ -130,7 +151,8 @@ export function Arena({ state, live, sessionId, actions, onFx, onEmote, onExit }
         <canvas
           ref={canvasRef}
           className="bomb-canvas"
-          style={{ width: VIEW_W * scale, height: VIEW_H * scale }}
+          // O canvas pode ser mais largo que a página: a folha limita a 100%, aqui não.
+          style={{ width: view.w * scale, height: view.shownH * scale, maxWidth: "none" }}
         />
 
         {state.phase === "countdown" && (
@@ -171,17 +193,18 @@ export function Arena({ state, live, sessionId, actions, onFx, onEmote, onExit }
         )}
       </div>
 
-      <div className="flex w-full flex-col items-stretch gap-3 md:flex-row md:items-start md:justify-between">
-        {showPad ? (
-          <TouchPad controls={controls} />
-        ) : (
-          <p className="px-label text-center md:text-left">
-            setas ou WASD andam · espaço solta a bomba
-          </p>
-        )}
-        <div className="flex items-start justify-center gap-3">
+      {/* Embaixo: a dica (ou o direcional) e o balão, à direita. O registro da
+          arena fica escondido por enquanto; `state.log` continua chegando. */}
+      <div className="flex w-full flex-col items-stretch gap-3 md:flex-row md:items-start md:justify-end">
+        <div className="flex flex-col items-center gap-3 md:flex-row md:items-start">
+          {showPad ? (
+            <TouchPad controls={controls} />
+          ) : (
+            <p className="px-label text-center md:text-right">
+              setas ou WASD andam · espaço solta a bomba
+            </p>
+          )}
           <EmotePicker onSend={actions.emote} />
-          <SystemLog messages={state.log} />
         </div>
       </div>
     </main>

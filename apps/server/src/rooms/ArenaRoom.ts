@@ -6,7 +6,14 @@ import {
   MAX_PLAYERS,
   MIN_PLAYERS,
   RECONNECT_TIMEOUT,
+  arenaById,
+  isArenaSize,
   isEmote,
+  type ArenaMessage,
+  pickArena,
+  type ThemeMessage,
+  themeById,
+  type TimeMessage,
   type CreateRoomOptions,
   type EmoteEvent,
   type EmoteMessage,
@@ -52,6 +59,7 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
     start: (client: Client) =>
       this.act(client, () => {
         this.requireHost(client);
+        if (this.game.phase === "lobby" || this.game.phase === "finished") this.drawArena();
         this.game.start();
       }),
 
@@ -78,7 +86,43 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
       this.act(client, () => {
         this.requireHost(client);
         if (this.game.phase !== "finished") throw new GameError("A rodada ainda está rolando.");
+        this.drawArena();
         this.game.start();
+      }),
+
+    /**
+     * O host escolheu o tamanho da arena. A planta não se escolhe: a sala
+     * sorteia uma das três do tamanho agora e de novo a cada rodada
+     * (`drawArena`), e é esta que vai para todo mundo.
+     */
+    arena: (client: Client, message: ArenaMessage) =>
+      this.act(client, () => {
+        this.requireHost(client);
+        if (!isArenaSize(message?.size)) throw new GameError("Esse tamanho de arena não existe.");
+        this.game.setArena(pickArena(message.size));
+      }),
+
+    /** O host escolheu o tempo da próxima rodada. O motor confere a lista e o mínimo da arena. */
+    time: (client: Client, message: TimeMessage) =>
+      this.act(client, () => {
+        this.requireHost(client);
+        this.game.setMatchMinutes(Number(message?.minutes));
+      }),
+
+    /**
+     * O host escolheu o tema. É só desenho, e nem passa pelo motor: a sala
+     * confere que existe e espelha para todos. Como a arena, não muda no meio
+     * da rodada — a tela de todo mundo troca de uma vez, no lobby.
+     */
+    theme: (client: Client, message: ThemeMessage) =>
+      this.act(client, () => {
+        this.requireHost(client);
+        const theme = themeById(message?.themeId);
+        if (!theme) throw new GameError("Esse tema não existe.");
+        if (this.game.phase !== "lobby" && this.game.phase !== "finished") {
+          throw new GameError("A rodada já começou.");
+        }
+        this.state.themeId = theme.id;
       }),
   };
 
@@ -91,6 +135,18 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
       MAX_PLAYERS,
     );
     this.maxClients = this.state.maxPlayers;
+    // O tamanho com que a sala abre: o da última vez, se a arena ainda existir; a planta é sorteada.
+    const arena = arenaById(options?.arenaId);
+    if (arena) this.game.setArena(pickArena(arena.size));
+    // E o tema da última vez, se existir.
+    const theme = themeById(options?.themeId);
+    if (theme) this.state.themeId = theme.id;
+    // E o tempo da última vez, se couber nessa arena; senão fica o padrão.
+    try {
+      this.game.setMatchMinutes(Number(options?.minutes));
+    } catch {
+      /* fora da lista ou abaixo do mínimo: o padrão serve */
+    }
 
     // O relógio do motor. Ele avança sempre, mesmo no lobby: é barato e
     // dispensa ligar e desligar o intervalo a cada rodada.
@@ -98,6 +154,7 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
       this.game.tick(dt);
       this.sync();
     }, TICK_MS);
+    this.sync();
   }
 
   onJoin(client: Client, options: JoinRoomOptions) {
@@ -218,6 +275,11 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
     }
   }
 
+  /** O sorteio da planta da rodada: uma das três do tamanho escolhido. */
+  private drawArena() {
+    this.game.setArena(pickArena(this.game.arena.size));
+  }
+
   /** Espelha o motor no estado sincronizado. Roda a cada tick: só escreve o que mudou. */
   private sync() {
     const { game, state } = this;
@@ -226,9 +288,19 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
     state.countdown = game.countdown;
     state.winnerId = game.winnerId;
     state.round = game.round;
+    state.arenaId = game.arena.id;
+    state.cols = game.cols;
+    state.rows = game.rows;
+    state.matchMinutes = game.matchMinutes;
 
-    for (let i = 0; i < game.grid.length; i++) {
-      if (state.grid[i] !== game.grid[i]) state.grid[i] = game.grid[i];
+    if (state.grid.length !== game.grid.length) {
+      // Outra arena, outro tamanho: a grade inteira vai de novo.
+      state.grid.splice(0);
+      state.grid.push(...game.grid);
+    } else {
+      for (let i = 0; i < game.grid.length; i++) {
+        if (state.grid[i] !== game.grid[i]) state.grid[i] = game.grid[i];
+      }
     }
 
     this.syncPlayers();
@@ -270,6 +342,8 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
       entry.lives = player.lives;
       entry.range = player.range;
       entry.bombs = player.bombs;
+      entry.kick = player.kick;
+      entry.pierce = player.pierce;
       entry.speed = player.speed;
       entry.invulnerable = player.alive && game.time < player.invulnerableUntil;
       entry.curse = player.curse;
@@ -284,7 +358,13 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
       game.bombs.every((bomb, i) => state.bombs[i].id === bomb.id);
     if (same) {
       game.bombs.forEach((bomb, i) => {
-        if (state.bombs[i].owner !== bomb.owner) state.bombs[i].owner = bomb.owner;
+        const entry = state.bombs[i];
+        if (entry.owner !== bomb.owner) entry.owner = bomb.owner;
+        // Chutada, ela anda: a célula e o centro seguem o motor.
+        if (entry.cx !== bomb.cx) entry.cx = bomb.cx;
+        if (entry.cy !== bomb.cy) entry.cy = bomb.cy;
+        if (entry.x !== bomb.x) entry.x = bomb.x;
+        if (entry.y !== bomb.y) entry.y = bomb.y;
       });
       return;
     }
@@ -294,7 +374,10 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
       entry.id = bomb.id;
       entry.cx = bomb.cx;
       entry.cy = bomb.cy;
+      entry.x = bomb.x;
+      entry.y = bomb.y;
       entry.owner = bomb.owner;
+      entry.pierce = bomb.pierce;
       state.bombs.push(entry);
     }
   }
@@ -304,7 +387,11 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
     const same =
       state.flames.length === game.flames.length &&
       game.flames.every(
-        (f, i) => state.flames[i].cx === f.cx && state.flames[i].cy === f.cy && state.flames[i].kind === f.kind,
+        (f, i) =>
+          state.flames[i].cx === f.cx &&
+          state.flames[i].cy === f.cy &&
+          state.flames[i].kind === f.kind &&
+          state.flames[i].born === f.born,
       );
     if (same) return;
     state.flames.splice(0);
@@ -313,6 +400,7 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
       entry.cx = flame.cx;
       entry.cy = flame.cy;
       entry.kind = flame.kind;
+      entry.born = flame.born;
       state.flames.push(entry);
     }
   }

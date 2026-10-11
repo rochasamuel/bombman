@@ -1,8 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BombGame,
+  DEFAULT_ARENA,
   GameError,
-  MATCH_TIME,
+  ARENA_SIZE_NAME,
+  DEFAULT_MATCH_MINUTES,
+  DEFAULT_THEME,
+  arenasOfSize,
+  isArenaSize,
+  pickArena,
+  type ArenaSize,
+  minMinutesFor,
+  arenaById,
+  themeById,
+  type ArenaDefinition,
   type ArenaState,
   type EmoteEvent,
   type FxEvent,
@@ -10,6 +21,8 @@ import {
   type PublicPlayer,
 } from "@bomb/shared";
 import { Arena } from "../components/Arena";
+import { ArenaPicker } from "../components/ArenaPicker";
+import { TimePicker } from "../components/TimePicker";
 import type { RoomActions } from "../game/useRoomConnection";
 
 /**
@@ -20,11 +33,85 @@ import type { RoomActions } from "../game/useRoomConnection";
  * são bonecos de pé nos cantos: não andam, mas explodem. O relógio da rodada
  * não anda — a arena nunca acaba por tempo.
  *
- * O sorteio é fixo, para a arena nascer igual toda vez que a página abre.
+ * O sorteio dos itens que os blocos deixam é fixo; a planta, como na sala
+ * de verdade, é sorteada entre as três do tamanho a cada rodada. O tamanho e
+ * o tema se escolhem antes, numa sala de espera de mentira com a MESMA
+ * escolha da sala de verdade. A escolha vai para a URL
+ * (`/mock?arena=small&theme=volcano`), para o F5 voltar a ela; uma planta na
+ * URL (`?arena=small-maze`) joga só ela, para olhar uma planta de perto.
+ * "Sair" da arena volta para a escolha.
  */
-export function MockScreen() {
-  const game = useMemo(() => buildGame(), []);
-  const first = useMemo(() => snapshot(game), [game]);
+export function MockScreen({ arena = "", theme = "" }: { arena?: string; theme?: string }) {
+  // `?arena=` aceita um tamanho (sorteio) ou uma planta (fixa, para olhar de perto).
+  const fixed = arenaById(arena);
+  const [size, setSize] = useState<ArenaSize>(() => (isArenaSize(arena) ? arena : (fixed ?? DEFAULT_ARENA).size));
+  const [themeId, setThemeId] = useState(() => (themeById(theme) ?? DEFAULT_THEME).id);
+  const [playing, setPlaying] = useState(false);
+  const [minutes, setMinutes] = useState<number>(DEFAULT_MATCH_MINUTES);
+  const shownMinutes = Math.max(minutes, minMinutesFor(size));
+  const pinned = fixed && fixed.size === size ? fixed : undefined;
+
+  const url = (size: string, themeId: string) => `/mock?arena=${size}&theme=${themeId}`;
+  const choose = (next: ArenaSize) => {
+    setSize(next);
+    history.replaceState({}, "", url(next, themeId));
+  };
+  const chooseTheme = (id: string) => {
+    if (!themeById(id)) return;
+    setThemeId(id);
+    history.replaceState({}, "", url(pinned?.id ?? size, id));
+  };
+
+  if (playing) {
+    return (
+      <MockMatch size={size} pinned={pinned} themeId={themeId} minutes={shownMinutes} onExit={() => setPlaying(false)} />
+    );
+  }
+
+  return (
+    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-5 p-6">
+      <div className="px-slab flex flex-col items-center gap-2 p-5">
+        <h1 className="px-title">Arena de mentira</h1>
+        <p className="px-label text-center">Sem servidor: o motor roda aqui, e você é o vermelho</p>
+      </div>
+      <ArenaPicker
+        arenaId={arenasOfSize(size)[0].id}
+        themeId={themeId}
+        canChoose
+        onChoose={choose}
+        onChooseTheme={chooseTheme}
+      />
+      <TimePicker minutes={shownMinutes} size={size} canChoose onChoose={setMinutes} />
+      <button type="button" className="px-btn px-btn-primary" onClick={() => setPlaying(true)}>
+        {pinned ? `Começar na ${pinned.name}` : `Começar na arena ${ARENA_SIZE_NAME[size].toLowerCase()}`}
+      </button>
+      <button type="button" className="px-link" onClick={() => history.back()}>
+        voltar
+      </button>
+    </main>
+  );
+}
+
+/** A partida de mentira numa arena: o motor, o relógio e a tela da arena. */
+function MockMatch({
+  size,
+  pinned,
+  themeId,
+  minutes,
+  onExit,
+}: {
+  size: ArenaSize;
+  /** Uma planta fixa (da URL); sem ela, cada rodada sorteia uma do tamanho. */
+  pinned?: ArenaDefinition;
+  themeId: string;
+  minutes: number;
+  onExit: () => void;
+}) {
+  const draw = useCallback(() => pinned ?? pickArena(size), [pinned, size]);
+  const game = useMemo(() => buildGame(draw(), minutes), [draw, minutes]);
+  /** O tema de mentira: um estado por fora do motor, como na sala. */
+  const themeRef = useRef(themeId);
+  const first = useMemo(() => snapshot(game, themeId), [game, themeId]);
   /** O retrato vivo, refeito a cada quadro: o canvas lê daqui, sem render. */
   const liveRef = useRef<ArenaState>(first);
   const [state, setState] = useState(first);
@@ -47,8 +134,8 @@ export function MockScreen() {
       game.tick(dt);
       // O relógio da rodada fica congelado: o /mock é para olhar, não para
       // acabar por tempo. Bombas, chamas e mortes seguem o relógio normal.
-      game.timeLeft = MATCH_TIME;
-      const next = snapshot(game);
+      game.timeLeft = game.matchMinutes * 60_000;
+      const next = snapshot(game, themeRef.current);
       liveRef.current = next;
       const key = signatureOf(next);
       if (key !== signature) {
@@ -67,15 +154,28 @@ export function MockScreen() {
 
   const actions = useMemo<RoomActions>(
     () => ({
-      start: () => quietly(() => game.start()),
+      start: () =>
+        quietly(() => {
+          game.setArena(draw());
+          game.start();
+        }),
+      arena: (next) => quietly(() => game.setArena(pickArena(next))),
+      time: (minutes) => quietly(() => game.setMatchMinutes(minutes)),
+      theme: (id) => {
+        if (themeById(id)) themeRef.current = id;
+      },
       input: (dx, dy) => game.setInput(ME, dx, dy),
       bomb: () => game.requestBomb(ME),
       emote: (emote) => {
         for (const handler of emoteHandlers.current) handler({ by: ME, emote });
       },
-      restart: () => quietly(() => game.start()),
+      restart: () =>
+        quietly(() => {
+          game.setArena(draw());
+          game.start();
+        }),
     }),
-    [game],
+    [game, draw],
   );
 
   const onFx = useCallback((handler: (events: FxEvent[]) => void) => {
@@ -98,7 +198,7 @@ export function MockScreen() {
       actions={actions}
       onFx={onFx}
       onEmote={onEmote}
-      onExit={() => history.back()}
+      onExit={onExit}
     />
   );
 }
@@ -108,8 +208,9 @@ const ME = "p0";
 
 const EXTRAS = ["Bruno", "Carla", "Davi"];
 
-function buildGame(): BombGame {
-  const game = new BombGame(seeded(7));
+function buildGame(arena: ArenaDefinition, minutes: number): BombGame {
+  const game = new BombGame(seeded(7), arena);
+  game.setMatchMinutes(minutes);
   game.addPlayer(ME, "k0", "Você");
   EXTRAS.forEach((name, i) => game.addPlayer(`p${i + 1}`, `k${i + 1}`, name));
   game.start();
@@ -118,7 +219,7 @@ function buildGame(): BombGame {
   return game;
 }
 
-/** Um gerador congruente linear: o bastante para a arena nascer sempre igual. */
+/** Um gerador congruente linear: o bastante para os itens caírem sempre iguais. */
 function seeded(seed: number) {
   return () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
 }
@@ -133,16 +234,21 @@ function quietly(action: () => void) {
 }
 
 /** O retrato do motor no formato do estado público, como a sala espelha. */
-function snapshot(game: BombGame): ArenaState {
+function snapshot(game: BombGame, themeId: string): ArenaState {
   return {
     roomName: "Arena de mentira",
     hostId: ME,
     phase: game.phase,
     maxPlayers: 4,
+    arenaId: game.arena.id,
+    themeId,
+    cols: game.cols,
+    rows: game.rows,
+    matchMinutes: game.matchMinutes,
     players: game.players.map((player) => publicPlayer(game, player)),
     grid: game.grid,
-    bombs: game.bombs.map(({ id, cx, cy, owner }) => ({ id, cx, cy, owner })),
-    flames: game.flames.map(({ cx, cy, kind }) => ({ cx, cy, kind })),
+    bombs: game.bombs.map(({ id, cx, cy, x, y, owner, pierce }) => ({ id, cx, cy, x, y, owner, pierce })),
+    flames: game.flames.map(({ cx, cy, kind, born }) => ({ cx, cy, kind, born })),
     powerups: game.powerups.map(({ cx, cy, kind }) => ({ cx, cy, kind })),
     timeLeft: Math.round(game.timeLeft),
     countdown: game.countdown,
@@ -169,6 +275,8 @@ function publicPlayer(game: BombGame, player: GamePlayer): PublicPlayer {
     range: player.range,
     bombs: player.bombs,
     speed: player.speed,
+    kick: player.kick,
+    pierce: player.pierce,
     invulnerable: player.alive && game.time < player.invulnerableUntil,
     curse: player.curse,
     wins: player.wins,
@@ -179,6 +287,8 @@ function publicPlayer(game: BombGame, player: GamePlayer): PublicPlayer {
 function signatureOf(state: ArenaState): string {
   return [
     state.phase,
+    state.arenaId,
+    state.themeId,
     state.countdown,
     state.winnerId,
     state.round,

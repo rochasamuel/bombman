@@ -1,10 +1,13 @@
 import { useState } from "react";
-import { MIN_PLAYERS, SLOT_COLORS, SLOT_NAMES } from "@bomb/shared";
+import { ARENA_SIZE_NAME, MIN_PLAYERS, SLOT_COLORS, SLOT_NAMES, arenaById, arenasOfSize, type ArenaSize } from "@bomb/shared";
 import { characterIdle } from "../art/atlas";
 import { Arena } from "../components/Arena";
+import { ArenaPicker } from "../components/ArenaPicker";
+import { TimePicker } from "../components/TimePicker";
 import { PixelSprite } from "../components/PixelSprite";
 import { useRoomConnection } from "../game/useRoomConnection";
 import { navigate, roomUrl } from "../lib/router";
+import { loadSetup, saveSetup } from "../lib/session";
 import { useUi } from "../store/ui";
 
 export function RoomScreen({ code }: { code: string }) {
@@ -78,6 +81,22 @@ function Lobby({
   const state = connection.state!;
   const isHost = state.hostId === connection.sessionId;
   const canShare = typeof navigator.share === "function";
+  const arena = arenaById(state.arenaId);
+
+  /** O host escolheu: a sala confere e espalha; a próxima sala deste navegador já abre com ela. */
+  const chooseArena = (size: ArenaSize) => {
+    connection.actions.arena(size);
+    // A próxima sala deste navegador abre no mesmo tamanho (a planta é sorteada lá).
+    saveSetup({ ...loadSetup(), arenaId: arenasOfSize(size)[0].id });
+  };
+  const chooseTime = (minutes: number) => {
+    connection.actions.time(minutes);
+    saveSetup({ ...loadSetup(), minutes });
+  };
+  const chooseTheme = (themeId: string) => {
+    connection.actions.theme(themeId);
+    saveSetup({ ...loadSetup(), themeId });
+  };
 
   const copy = async () => {
     await navigator.clipboard.writeText(roomUrl(code));
@@ -148,6 +167,15 @@ function Lobby({
         </ul>
       </div>
 
+      <ArenaPicker
+        arenaId={state.arenaId}
+        themeId={state.themeId}
+        canChoose={isHost}
+        onChoose={chooseArena}
+        onChooseTheme={chooseTheme}
+      />
+      <TimePicker minutes={state.matchMinutes} size={arena?.size ?? "large"} canChoose={isHost} onChoose={chooseTime} />
+
       {isHost ? (
         <button
           type="button"
@@ -157,7 +185,7 @@ function Lobby({
         >
           {state.players.length < MIN_PLAYERS
             ? `Faltam ${MIN_PLAYERS - state.players.length} para começar`
-            : "Começar a rodada"}
+            : `Começar na arena ${ARENA_SIZE_NAME[arena?.size ?? "large"].toLowerCase()}`}
         </button>
       ) : (
         <p className="px-label text-center">

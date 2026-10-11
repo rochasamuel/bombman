@@ -1,7 +1,6 @@
 import {
   BRICK,
   BUSH,
-  COLS,
   DEATH_TIME,
   DOWN,
   FLAME_CENTER,
@@ -12,7 +11,6 @@ import {
   FLAME_H,
   LEFT,
   RIGHT,
-  ROWS,
   TILE,
   UP,
   WALL,
@@ -22,6 +20,9 @@ import {
 } from "@bomb/shared";
 import * as art from "../art/atlas";
 import type { Facing, FlamePiece, Frame } from "../art/atlas";
+import { BACKGROUND, MARGIN, STRETCH } from "../art/scenario";
+import { ornamentsOf, themeArt, type ThemeArt } from "../art/themes";
+import { bombFrame, flameStep, itemStep } from "./fuse";
 import { DELAY_MS, record, sampleAt, type Sample } from "./interp";
 import { idleStep, walkStep } from "./walk";
 
@@ -32,15 +33,43 @@ import { idleStep, walkStep } from "./walk";
  * por isso a imagem fica em alta definição em vez de serrilhada. Nada aqui
  * decide regra: se o servidor diz que a chama está na célula, a chama é
  * desenhada; o que é deste arquivo é só o tempo entre um patch e outro — a
- * posição interpolada, o quadro da animação, o pulso da bomba.
+ * posição interpolada, o quadro da animação, o pulso da bomba. A bomba e a
+ * chama não trazem relógio: a tela anota quando viu cada uma pela primeira
+ * vez e escolhe o quadro pela idade (ver `fuse.ts`).
  */
 
-/** A borda de jardim em volta da muralha, em células. */
-export const MARGIN = 1;
-export const VIEW_COLS = COLS + MARGIN * 2;
-export const VIEW_ROWS = ROWS + MARGIN * 2;
-export const VIEW_W = VIEW_COLS * TILE;
-export const VIEW_H = VIEW_ROWS * TILE;
+/**
+ * O que o canvas de uma arena `cols × rows` mede, em pixels lógicos: a arena
+ * e o fundo escuro em volta, onde os merlões e os cantos passam da muralha.
+ * `shownH` é a altura que a tela mostra: a desenhada, esticada na proporção
+ * da referência (ver `STRETCH`). A célula continua com 16 px lógicos em
+ * qualquer tamanho: uma arena maior é um canvas maior, não uma peça maior.
+ */
+export function viewOf(cols: number, rows: number) {
+  const w = cols * TILE + MARGIN * 2;
+  const h = rows * TILE + MARGIN * 2;
+  return { w, h, shownH: Math.round(h * STRETCH) };
+}
+
+/**
+ * A maior escala, em quartos (2, 2,25, 2,5…), em que o canvas de `view` cabe
+ * na largura e na altura que sobram na janela; entre 0,5 e 6. Uma arena menor
+ * é um canvas menor, que cabe numa escala maior. Abaixo de 1 a célula fica
+ * menor que os 16 px lógicos (um celular deitado com o direcional na tela):
+ * é pequeno, mas a página não rola.
+ */
+export function fitScale(availW: number, availH: number, view: { w: number; shownH: number }): number {
+  const raw = Math.min(availW / view.w, availH / view.shownH);
+  return Math.max(0.5, Math.min(6, Math.floor(raw * 4) / 4));
+}
+
+/** Algo que assenta no chão: desenhado na ordem do pé (`y`, a borda de baixo, em pixels lógicos) e, no mesmo pé, do `rank`. */
+type Drawable = { y: number; rank: number; draw: (ctx: CanvasRenderingContext2D) => void };
+const BLOCK = 0;
+const POWERUP = 1;
+const FLAME = 2;
+const BOMB = 3;
+const PLAYER = 4;
 
 type Puppet = {
   x: number;
@@ -71,108 +100,211 @@ function blit(ctx: CanvasRenderingContext2D, frame: Frame, x: number, y: number,
 
 export class ArenaRenderer {
   private puppets = new Map<string, Puppet>();
+  /** Quando cada bomba (por id) e cada chama (por célula e nascimento) apareceu, no relógio da tela. */
+  private bombSeen = new Map<string, number>();
+  /** O rastro de cada bomba, por id: chutada, ela anda e é interpolada como os bonecos. */
+  private bombTrails = new Map<string, Sample[]>();
+  private flameSeen = new Map<string, number>();
   private scale = 1;
   private dpr = 1;
+  private cols = 0;
+  private rows = 0;
   private canvas: HTMLCanvasElement;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
   }
 
-  /** `scale` é em pixels CSS por pixel lógico; o canvas acompanha a densidade da tela. */
-  setScale(scale: number) {
+  /**
+   * O tamanho do canvas: a arena `cols × rows` em `scale` pixels CSS por
+   * pixel lógico; o canvas acompanha a densidade da tela.
+   */
+  fit(scale: number, cols: number, rows: number) {
     const dpr = typeof devicePixelRatio === "number" ? devicePixelRatio : 1;
-    const width = Math.round(VIEW_W * scale * dpr);
-    if (scale === this.scale && dpr === this.dpr && this.canvas.width === width) return;
+    const { w, shownH } = viewOf(cols, rows);
+    const width = Math.round(w * scale * dpr);
+    if (
+      scale === this.scale &&
+      dpr === this.dpr &&
+      cols === this.cols &&
+      rows === this.rows &&
+      this.canvas.width === width
+    ) {
+      return;
+    }
     this.scale = scale;
     this.dpr = dpr;
+    this.cols = cols;
+    this.rows = rows;
     this.canvas.width = width;
-    this.canvas.height = Math.round(VIEW_H * scale * dpr);
+    this.canvas.height = Math.round(shownH * scale * dpr);
   }
 
   draw(state: ArenaState | null, now: number) {
     const ctx = this.canvas.getContext("2d");
     if (!ctx) return;
+    // A arena que o estado traz; sem estado, o canvas do tamanho que se pediu.
+    const cols = state?.cols || this.cols;
+    const rows = state?.rows || this.rows;
+    if (state && (cols !== this.cols || rows !== this.rows)) this.fit(this.scale, cols, rows);
+    const { w, h, shownH } = viewOf(cols, rows);
     const k = this.scale * this.dpr;
-    ctx.setTransform(k, 0, 0, k, 0, 0);
+    // Na vertical, a escala leva o esticão da proporção da referência.
+    ctx.setTransform(k, 0, 0, (k * shownH) / h, 0, 0);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
 
-    this.drawGarden(ctx);
-    ctx.translate(MARGIN * TILE, MARGIN * TILE);
+    ctx.fillStyle = BACKGROUND;
+    ctx.fillRect(0, 0, w, h);
+    ctx.translate(MARGIN, MARGIN);
 
-    if (!state) return;
-    this.drawGrid(ctx, state);
-    this.drawPowerups(ctx, state, now);
-    this.drawBombs(ctx, state, now);
-    this.drawFlames(ctx, state, now);
-    this.drawPlayers(ctx, state, now);
-  }
-
-  /* ------------------------------------------------------------ o jardim */
-
-  private drawGarden(ctx: CanvasRenderingContext2D) {
-    for (let cy = 0; cy < VIEW_ROWS; cy++) {
-      for (let cx = 0; cx < VIEW_COLS; cx++) {
-        const edge =
-          cx < MARGIN || cy < MARGIN || cx >= VIEW_COLS - MARGIN || cy >= VIEW_ROWS - MARGIN;
-        if (!edge) continue;
-        blit(ctx, art.garden(cx, cy), cx * TILE, cy * TILE);
-      }
-    }
-    // As árvores nas laterais (cada uma de uma versão) e um banco embaixo.
-    const tree = (cx: number, cy: number) => {
-      const frame = art.tree(cx, cy);
-      const w = art.logicalWidth(frame);
-      blit(ctx, frame, cx * TILE + (TILE - w) / 2, (cy + 1) * TILE - art.logicalHeight(frame));
-    };
-    for (let cy = 1; cy < VIEW_ROWS - 1; cy += 3) {
-      tree(0, cy);
-      tree(VIEW_COLS - 1, cy + 1);
-    }
-    for (let cx = 3; cx < VIEW_COLS - 3; cx += 4) {
-      tree(cx, 0);
-      tree(cx + 2, VIEW_ROWS - 1);
-    }
-    const benchFrame = art.bench();
-    const benchY = (VIEW_ROWS - 1) * TILE + (TILE - art.logicalHeight(benchFrame)) / 2;
-    blit(ctx, benchFrame, Math.floor(VIEW_COLS / 2) * TILE + 1, benchY);
-    blit(ctx, benchFrame, (Math.floor(VIEW_COLS / 2) - 4) * TILE + 1, benchY);
+    if (!state || state.grid.length !== cols * rows) return;
+    // O tema é só desenho: a mesma planta, com as peças do tileset escolhido.
+    const theme = themeArt(state.themeId);
+    this.drawGrid(ctx, state, theme);
+    /*
+     * Tudo o que assenta no chão — bloco, item, chama, bomba, boneco — é
+     * desenhado em ordem de profundidade: pelo pé (a borda de baixo), de
+     * cima para baixo. Um pilar mais alto que a célula (o da floresta, a
+     * máquina cyberpunk) sobe para a célula de cima, e quem está lá fica
+     * atrás dele; quem está na célula de baixo fica na frente. No mesmo pé
+     * vale a ordem clássica: o bloco embaixo, o item, a chama, a bomba e o
+     * boneco por cima.
+     */
+    const layer: Drawable[] = [];
+    this.layBlocks(layer, state, theme);
+    this.layPowerups(layer, state, now);
+    this.layFlames(layer, state, now);
+    this.layBombs(layer, state, now);
+    this.layPlayers(layer, ctx, state, now);
+    layer.sort((a, b) => a.y - b.y || a.rank - b.rank);
+    for (const entry of layer) entry.draw(ctx);
+    // A muralha de baixo é a mais perto de quem olha: ela e os ornamentos
+    // dela sobem por cima da última fileira (as ameias de neve, os merlões),
+    // e ficam na frente de tudo o que pisa nela.
+    this.drawBottomWall(ctx, cols, rows, theme);
   }
 
   /* ------------------------------------------------------------ a grade */
 
   /**
-   * O chão inteiro primeiro, depois os blocos (muralha com os cantos de
-   * lanterna, pilar, tijolo, moita) de cima para baixo. Em vista de 3/4 a face de cima do bloco
-   * sobe um pouco para a célula de cima; como no Bomberman clássico, tudo o que
-   * se mexe (item, bomba, chama, boneco) vem depois, por cima dos blocos, e
-   * nunca é cortado por eles.
+   * O chão inteiro primeiro, depois a muralha da borda (com os cantos, os
+   * merlões de cima e os blocos dos lados). Os blocos (pilar, tijolo, moita)
+   * e tudo o que se mexe vêm depois, em ordem de profundidade (ver `draw`);
+   * só os merlões da muralha de baixo vêm depois de tudo.
    */
-  private drawGrid(ctx: CanvasRenderingContext2D, state: ArenaState) {
-    // O chão vai também embaixo da muralha: o canto tem recortes (o chanfro, o degrau da lanterna).
-    for (let cy = 0; cy < ROWS; cy++) {
-      for (let cx = 0; cx < COLS; cx++) blit(ctx, art.floor(cx, cy), cx * TILE, cy * TILE);
+  private drawGrid(ctx: CanvasRenderingContext2D, state: ArenaState, theme: ThemeArt) {
+    const { cols, rows } = state;
+    // O chão vai também embaixo da muralha: o canto deixa ver um pouco dele.
+    for (let cy = 0; cy < rows; cy++) {
+      for (let cx = 0; cx < cols; cx++) {
+        blit(ctx, art.floor(theme.floor(cols, rows, cx, cy), theme.id), cx * TILE, cy * TILE);
+      }
     }
-    for (let cy = 0; cy < ROWS; cy++) {
-      for (let cx = 0; cx < COLS; cx++) {
-        const cell = state.grid[cellIndex(cx, cy)];
-        const side = cell === WALL ? wallSide(cx, cy) : null;
-        const corner = side ? cornerSide(cx, cy) : null;
-        const frame = corner
-          ? art.corner(corner)
-          : side
-            ? art.wall(side)
-            : cell === WALL
-            ? art.pillar()
+    this.drawWalls(ctx, cols, rows, theme);
+  }
+
+  /** Os blocos de dentro da muralha: pilar, tijolo, moita, cada um no pé da sua célula. */
+  private layBlocks(layer: Drawable[], state: ArenaState, theme: ThemeArt) {
+    const { cols, rows } = state;
+    for (let cy = 0; cy < rows; cy++) {
+      for (let cx = 0; cx < cols; cx++) {
+        if (wallSide(cx, cy, cols, rows)) continue;
+        const cell = state.grid[cellIndex(cx, cy, cols)];
+        const frame =
+          cell === WALL
+            ? art.pillar(theme.id)
             : cell === BRICK
-              ? art.brick()
+              ? art.brick(theme.brick(cols, rows, cx, cy), theme.id)
               : cell === BUSH
                 ? art.bush()
                 : null;
-        if (frame) this.drawBlock(ctx, frame, cx * TILE, cy * TILE);
+        if (frame) layer.push({ y: (cy + 1) * TILE, rank: BLOCK, draw: (ctx) => this.drawBlock(ctx, frame, cx * TILE, cy * TILE) });
       }
     }
+  }
+
+  /**
+   * A muralha: a fieira de cada lado, os quatro cantos e os ornamentos de
+   * cima e dos lados (os de baixo vêm depois de tudo, ver `draw`). A peça da
+   * muralha de cima pode ser mais alta que a célula (as ameias de neve): o
+   * que passa sobe para a margem. A de baixo é a mesma peça de pé, subindo
+   * por cima da última fileira como no cenário, ou — nos temas em que a
+   * borda fica para fora dos dois lados — a de cima espelhada, descendo
+   * para a margem.
+   */
+  private drawWalls(ctx: CanvasRenderingContext2D, cols: number, rows: number, theme: ThemeArt) {
+    // A fileira de baixo fica para o fim (`drawBottomWall`).
+    for (let cy = 0; cy < rows - 1; cy++) {
+      for (let cx = 0; cx < cols; cx++) {
+        const side = wallSide(cx, cy, cols, rows);
+        if (!side) continue;
+        const frame = art.wall(side, theme.id);
+        const h = art.logicalHeight(frame);
+        blit(ctx, frame, cx * TILE, side === "t" ? (cy + 1) * TILE - h : cy * TILE);
+      }
+    }
+    this.drawCorners(ctx, 0, cols, theme);
+    this.drawOrnaments(ctx, "t", cols, rows, theme);
+    this.drawOrnaments(ctx, "l", cols, rows, theme);
+    this.drawOrnaments(ctx, "r", cols, rows, theme);
+  }
+
+  /** Os dois cantos de uma fileira. O canto passa um pouco da célula: para os lados, para cima e um pixel para baixo. */
+  private drawCorners(ctx: CanvasRenderingContext2D, cy: number, cols: number, theme: ThemeArt) {
+    const corner = art.corner(theme.id);
+    const cw = art.logicalWidth(corner);
+    const ch = art.logicalHeight(corner);
+    for (const cx of [0, cols - 1]) blit(ctx, corner, cx * TILE + (TILE - cw) / 2, (cy + 1) * TILE + 1 - ch);
+  }
+
+  /**
+   * A muralha de baixo, com os cantos e os ornamentos, por cima de tudo.
+   * De pé, a peça sobe por cima da última fileira (as ameias de neve da
+   * cidadela); espelhada, desce para a margem.
+   */
+  private drawBottomWall(ctx: CanvasRenderingContext2D, cols: number, rows: number, theme: ThemeArt) {
+    const mirror = art.walls(theme.id).bottom === "mirror";
+    const frame = art.wall("b", theme.id);
+    const h = art.logicalHeight(frame);
+    const y = mirror ? (rows - 1) * TILE : rows * TILE - h;
+    for (let cx = 1; cx < cols - 1; cx++) blit(ctx, frame, cx * TILE, y);
+    this.drawCorners(ctx, rows - 1, cols, theme);
+    this.drawOrnaments(ctx, "b", cols, rows, theme);
+  }
+
+  /**
+   * Os ornamentos de um lado da muralha, série por série (ver `ornamentsOf`).
+   * Em cima, de pé no chão da muralha; embaixo, idem (ou pendendo da borda,
+   * se a muralha é espelhada); nos lados, centrados na célula da muralha —
+   * ou, na referência, encostados na borda de fora, passando um pixel dela.
+   */
+  private drawOrnaments(ctx: CanvasRenderingContext2D, side: art.WallSide, cols: number, rows: number, theme: ThemeArt) {
+    const walls = art.walls(theme.id);
+    const horizontal = side === "t" || side === "b";
+    const series = horizontal ? walls.top : walls.side;
+    const length = horizontal ? cols : rows;
+    series.forEach((entry, s) => {
+      for (const { at, piece } of ornamentsOf(entry, length)) {
+        const frame = art.ornament(side, s, piece, theme.id);
+        const w = art.logicalWidth(frame);
+        const h = art.logicalHeight(frame);
+        if (side === "t") {
+          blit(ctx, frame, at * TILE - w / 2, TILE - h);
+        } else if (side === "b") {
+          const y = walls.bottom === "mirror" ? (rows - 1) * TILE : rows * TILE - h;
+          blit(ctx, frame, at * TILE - w / 2, y);
+        } else {
+          const x =
+            walls.sideAnchor === "outer"
+              ? side === "l"
+                ? -1
+                : cols * TILE + 1 - w
+              : (side === "l" ? 0 : (cols - 1) * TILE) + (TILE - w) / 2;
+          blit(ctx, frame, x, at * TILE - h / 2);
+        }
+      }
+    });
   }
 
   /** Um bloco assenta no chão da célula, centrado; o que passa da altura sobe. */
@@ -182,38 +314,64 @@ export class ArenaRenderer {
     blit(ctx, frame, x + (TILE - w) / 2, y + TILE - h);
   }
 
-  private drawPowerups(ctx: CanvasRenderingContext2D, state: ArenaState, now: number) {
+  private layPowerups(layer: Drawable[], state: ArenaState, now: number) {
+    const step = itemStep(now);
     for (const drop of state.powerups) {
       // O item flutua devagar, cada um na sua fase, para a arena não ficar parada.
       const bob = Math.sin(now / 350 + drop.cx * 1.3 + drop.cy * 0.7);
-      blit(ctx, art.powerup(drop.kind), drop.cx * TILE, drop.cy * TILE + bob);
+      const frame = art.powerup(drop.kind, step);
+      layer.push({ y: (drop.cy + 1) * TILE, rank: POWERUP, draw: (ctx) => blit(ctx, frame, drop.cx * TILE, drop.cy * TILE + bob) });
     }
   }
 
-  private drawBombs(ctx: CanvasRenderingContext2D, state: ArenaState, now: number) {
+  private layBombs(layer: Drawable[], state: ArenaState, now: number) {
+    const alive = new Set<string>();
     for (const bomb of state.bombs) {
-      // O pavio queima em cinco quadros e a bomba incha e murcha de leve.
-      const frame = art.bomb(Math.floor(now / 120));
-      const phase = (now / 500) % 1;
-      const swell = 1 + 0.04 * Math.sin(phase * Math.PI * 2);
-      const w = art.logicalWidth(frame) * swell;
-      const h = art.logicalHeight(frame) * swell;
-      blit(ctx, frame, bomb.cx * TILE + (TILE - w) / 2, (bomb.cy + 1) * TILE - h, w, h);
+      alive.add(bomb.id);
+      // O pavio queima desde que a tela viu a bomba; o pulso e o estouro vêm no fim do fuso.
+      const { phase, step } = bombFrame(now - this.firstSeen(this.bombSeen, bomb.id, now));
+      const frame = art.bomb(phase, step, bomb.pierce);
+      const w = art.logicalWidth(frame);
+      const h = art.logicalHeight(frame);
+      // Parada, o centro é o da célula; chutada, segue o rastro com o mesmo atraso dos bonecos.
+      let trail = this.bombTrails.get(bomb.id);
+      if (!trail) this.bombTrails.set(bomb.id, (trail = []));
+      record(trail, now, bomb.x, bomb.y);
+      const { x, y } = sampleAt(trail, now - DELAY_MS);
+      const foot = (y + 0.5) * TILE;
+      layer.push({ y: foot, rank: BOMB, draw: (ctx) => blit(ctx, frame, x * TILE - w / 2, foot - h) });
     }
+    forget(this.bombSeen, alive);
+    forget(this.bombTrails, alive);
   }
 
-  private drawFlames(ctx: CanvasRenderingContext2D, state: ArenaState, now: number) {
-    const alt = Math.floor(now / 70) % 2 === 1;
+  private layFlames(layer: Drawable[], state: ArenaState, now: number) {
+    const alive = new Set<string>();
     for (const flame of state.flames) {
-      blit(ctx, art.flame(piece(flame.kind), alt), flame.cx * TILE, flame.cy * TILE);
+      // Uma chama reacesa (outra bomba na cadeia) nasce de novo: a chave muda e a animação recomeça.
+      const key = `${flame.cx},${flame.cy}:${flame.born}`;
+      alive.add(key);
+      const step = flameStep(now - this.firstSeen(this.flameSeen, key, now));
+      const frame = art.flame(piece(flame.kind), step);
+      layer.push({ y: (flame.cy + 1) * TILE, rank: FLAME, draw: (ctx) => blit(ctx, frame, flame.cx * TILE, flame.cy * TILE) });
     }
+    forget(this.flameSeen, alive);
+  }
+
+  /** Quando a tela viu `key` pela primeira vez; agora, se é a primeira. */
+  private firstSeen(seen: Map<string, number>, key: string, now: number): number {
+    let at = seen.get(key);
+    if (at === undefined) {
+      at = now;
+      seen.set(key, at);
+    }
+    return at;
   }
 
   /* ------------------------------------------------------------ os bonecos */
 
-  private drawPlayers(ctx: CanvasRenderingContext2D, state: ArenaState, now: number) {
+  private layPlayers(layer: Drawable[], ctx: CanvasRenderingContext2D, state: ArenaState, now: number) {
     const seen = new Set<string>();
-    const drawn: Array<{ y: number; draw: () => void }> = [];
 
     for (const player of state.players) {
       seen.add(player.id);
@@ -230,15 +388,11 @@ export class ArenaRenderer {
 
       if (!player.alive && !player.dying) continue;
 
-      drawn.push({
-        y: puppet.y,
-        draw: () => this.drawPlayer(ctx, state, player, puppet, now),
-      });
+      // O pé do boneco: a borda de baixo da célula em que está.
+      layer.push({ y: (puppet.y + 0.5) * TILE, rank: PLAYER, draw: () => this.drawPlayer(ctx, state, player, puppet, now) });
     }
 
     for (const [id] of this.puppets) if (!seen.has(id)) this.puppets.delete(id);
-    drawn.sort((a, b) => a.y - b.y);
-    for (const entry of drawn) entry.draw();
   }
 
   private drawPlayer(
@@ -290,6 +444,13 @@ export class ArenaRenderer {
       ? art.character(player.slot, facing, walkStep(puppet.stride, art.walkSteps(facing), walking))
       : art.characterIdle(player.slot, facing, idleStep(now, art.idleSteps(facing)));
     blit(ctx, sprite, x, y);
+
+    if (player.curse) {
+      // Amaldiçoado: a caveirinha paira sobre a cabeça, balançando devagar.
+      const mark = art.curse();
+      const bob = Math.round(Math.sin(now / 250));
+      blit(ctx, mark, x + (w - art.logicalWidth(mark)) / 2, y + art.HEAD_TOP - art.logicalHeight(mark) - 1 + bob);
+    }
   }
 
   private puppet(player: PublicPlayer, now: number): Puppet {
@@ -328,20 +489,17 @@ export class ArenaRenderer {
   }
 }
 
-/** A muralha da borda: cada lado tem a pedra virada para o seu lado; os cantos seguem o de cima e o de baixo. */
-/** Os quatro cantos da muralha: o lado do canto, ou nada. */
-function cornerSide(cx: number, cy: number): "l" | "r" | null {
-  if (cy !== 0 && cy !== ROWS - 1) return null;
-  if (cx === 0) return "l";
-  if (cx === COLS - 1) return "r";
-  return null;
+/** Esquece o que não está mais na arena, para o mapa não crescer a rodada inteira. */
+function forget(seen: Map<string, unknown>, alive: Set<string>) {
+  for (const key of seen.keys()) if (!alive.has(key)) seen.delete(key);
 }
 
-function wallSide(cx: number, cy: number): art.WallSide | null {
+/** A muralha da borda: cada lado tem a fieira virada para o seu lado. Fora da borda, nada. */
+function wallSide(cx: number, cy: number, cols: number, rows: number): art.WallSide | null {
   if (cy === 0) return "t";
-  if (cy === ROWS - 1) return "b";
+  if (cy === rows - 1) return "b";
   if (cx === 0) return "l";
-  if (cx === COLS - 1) return "r";
+  if (cx === cols - 1) return "r";
   return null;
 }
 

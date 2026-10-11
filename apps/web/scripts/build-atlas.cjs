@@ -2,19 +2,32 @@
 /*
  * Monta o atlas da arte a partir das imagens de referência:
  *
- *   node scripts/build-atlas.cjs <Retro Bomberman Garden Arena.png> <Bomberman Pixel Sprite Sheet.png> \
+ *   node scripts/build-atlas.cjs <bomb-garden-arena.png> <bomb-sprite-sheet.png> \
  *                                <bomb-iso_walk_down-trimmed.png> <bomb-iso_walk_up-trimmed.png> \
  *                                <bomb-iso_walk_right-trimmed.png> \
  *                                <bomb-iso_idle_down-trimmed.png> <bomb-iso_idle_up-trimmed.png> \
  *                                <bomb-iso_idle_right-trimmed.png> <bomb-iso_idle_left-trimmed.png> \
- *                                <bomb-iso_custom_victory_down.png>
+ *                                <bomb-iso_custom_victory_down.png> <bomb-tileset.png> \
+ *                                <bomb-fuse-sheet.png> <bomb-explosion-sheet.png> <bomb-items-sheet.png> \
+ *                                <bomb-pierce-sheet.png> \
+ *                                <enchanted_forest_tileset.png> <volcanic_fortress_tileset.png> \
+ *                                <frozen_citadel_tileset.png> <cyberpunk_facility_tileset.png> \
+ *                                <desert_temple_tileset.png>
  *
- * A última é a folha da vitória: o boneco de frente, na escala do parado,
- * erguendo os braços (25 quadros numa grade de 5×5).
+ * Os cinco últimos são os tilesets dos temas novos (ver `themes.cjs`): cada um
+ * dá ao atlas as mesmas peças de cenário que o da referência, com o nome do
+ * tema na frente (`forest_floor0`, `volcano_wall_t`…).
  *
- * O cenário (chão, grama, canteiros, blocos, muralha, árvores, banco) não vem
- * de imagem nenhuma: é desenhado em código por `scenery.cjs`, para que toda
- * peça emende com a vizinha. Da arena ficam só a chama e os corações do painel.
+ * A folha da vitória é o boneco de frente, na escala do parado, erguendo os
+ * braços (25 quadros numa grade de 5×5). O tileset do cenário dá o chão, a
+ * muralha com os merlões, o canto, o pilar e os tijolos. Só a moita continua
+ * desenhada em código (`scenery.cjs`): o tileset não tem uma, e a planta da
+ * arena não usa nenhuma. As três últimas são as folhas da bomba (parada,
+ * pavio, pulso e estouro), da explosão modular (centro, braços e pontas em
+ * oito quadros), dos itens (quatro quadros de brilho cada, a caveira
+ * inclusive) e da bomba perfurante (vermelha, com a ponta dourada, nas mesmas
+ * fases da bomba comum). Da arena antiga ficam só os corações do painel; da
+ * folha de sprites, o retrato e a morte.
  *
  * Depois da arena e da folha vêm as folhas de caminhada (de frente, de costas
  * e de lado) e as do parado (de frente, de costas, de lado direito e de lado
@@ -37,14 +50,37 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { PNG } = require("pngjs");
-const { paintScenery, VARIANTS } = require("./scenery.cjs");
+const { paintScenery } = require("./scenery.cjs");
+const { THEMES, cutTheme } = require("./themes.cjs");
 
-const [, , arenaPath, sheetPath, downPath, upPath, sidePath, idleDownPath, idleUpPath, idleRightPath, idleLeftPath, winPath] =
-  process.argv;
-if (!winPath) {
+const [
+  ,
+  ,
+  arenaPath,
+  sheetPath,
+  downPath,
+  upPath,
+  sidePath,
+  idleDownPath,
+  idleUpPath,
+  idleRightPath,
+  idleLeftPath,
+  winPath,
+  tilesetPath,
+  bombSheetPath,
+  explosionSheetPath,
+  itemSheetPath,
+  pierceSheetPath,
+  ...themePaths
+] = process.argv;
+/** A ordem dos tilesets dos temas na linha de comando. */
+const THEME_ORDER = ["forest", "volcano", "frozen", "cyber", "desert"];
+if (!pierceSheetPath || themePaths.length !== THEME_ORDER.length) {
   console.error(
     "uso: node scripts/build-atlas.cjs <arena.png> <sheet.png> <walk-down.png> <walk-up.png> <walk-side.png> " +
-      "<idle-down.png> <idle-up.png> <idle-right.png> <idle-left.png> <victory-down.png>",
+      "<idle-down.png> <idle-up.png> <idle-right.png> <idle-left.png> <victory-down.png> <scenario-tiles.png> " +
+      "<bomb-sheet.png> <explosion-sheet.png> <items-sheet.png> <pierce-bomb-sheet.png> " +
+      "<forest-tileset.png> <volcano-tileset.png> <frozen-tileset.png> <cyber-tileset.png> <desert-tileset.png>",
   );
   process.exit(1);
 }
@@ -70,6 +106,11 @@ const idleSheets = {
   left: PNG.sync.read(fs.readFileSync(idleLeftPath)),
 };
 const winSheet = PNG.sync.read(fs.readFileSync(winPath));
+const tileset = PNG.sync.read(fs.readFileSync(tilesetPath));
+const bombSheet = PNG.sync.read(fs.readFileSync(bombSheetPath));
+const explosionSheet = PNG.sync.read(fs.readFileSync(explosionSheetPath));
+const itemSheet = PNG.sync.read(fs.readFileSync(itemSheetPath));
+const pierceSheet = PNG.sync.read(fs.readFileSync(pierceSheetPath));
 
 /* -------------------------------------------------------------- utilidades */
 
@@ -174,6 +215,21 @@ function place(img, w, h, bottom = false) {
   return out;
 }
 
+/** Cola `src` em `dst` com o canto em (x, y), por cima do que havia. */
+function paste(dst, src, x, y) {
+  for (let yy = 0; yy < src.height; yy++) {
+    for (let xx = 0; xx < src.width; xx++) {
+      const dx = x + xx;
+      const dy = y + yy;
+      if (dx < 0 || dy < 0 || dx >= dst.width || dy >= dst.height) continue;
+      const i = (yy * src.width + xx) * 4;
+      if (src.data[i + 3] === 0) continue;
+      dst.data.set(src.data.subarray(i, i + 4), (dy * dst.width + dx) * 4);
+    }
+  }
+  return dst;
+}
+
 function mirror(img) {
   const out = blank(img.width, img.height);
   for (let y = 0; y < img.height; y++) {
@@ -182,16 +238,6 @@ function mirror(img) {
       const o = (y * img.width + (img.width - 1 - x)) * 4;
       out.data.set(img.data.subarray(i, i + 4), o);
     }
-  }
-  return out;
-}
-
-function flipV(img) {
-  const out = blank(img.width, img.height);
-  for (let y = 0; y < img.height; y++) {
-    const i = y * img.width * 4;
-    const o = (img.height - 1 - y) * img.width * 4;
-    out.data.set(img.data.subarray(i, i + img.width * 4), o);
   }
   return out;
 }
@@ -210,6 +256,37 @@ function rotate(img) {
 }
 
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+
+/** O que a inundação a partir das quatro bordas alcança sem pisar em `sealed`: o "fora". */
+function floodOutside(sealed, w, h) {
+  const outside = new Uint8Array(w * h);
+  const stack = [];
+  const push = (x, y) => {
+    if (x < 0 || y < 0 || x >= w || y >= h) return;
+    const i = y * w + x;
+    if (outside[i] || sealed[i]) return;
+    outside[i] = 1;
+    stack.push(i);
+  };
+  for (let x = 0; x < w; x++) {
+    push(x, 0);
+    push(x, h - 1);
+  }
+  for (let y = 0; y < h; y++) {
+    push(0, y);
+    push(w - 1, y);
+  }
+  while (stack.length) {
+    const i = stack.pop();
+    const x = i % w;
+    const y = (i - x) / w;
+    push(x + 1, y);
+    push(x - 1, y);
+    push(x, y + 1);
+    push(x, y - 1);
+  }
+  return outside;
+}
 
 /** Engorda uma máscara em `r` pixels (vizinhança quadrada). */
 function dilate(mask, w, h, r) {
@@ -243,33 +320,7 @@ function keyFlood(img, bg, tol) {
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) far[y * w + x] = dist(px(img, x, y), bg) > tol ? 1 : 0;
   }
-  const sealed = dilate(far, w, h, 2);
-  const outside = new Uint8Array(w * h);
-  const stack = [];
-  const push = (x, y) => {
-    if (x < 0 || y < 0 || x >= w || y >= h) return;
-    const i = y * w + x;
-    if (outside[i] || sealed[i]) return;
-    outside[i] = 1;
-    stack.push(i);
-  };
-  for (let x = 0; x < w; x++) {
-    push(x, 0);
-    push(x, h - 1);
-  }
-  for (let y = 0; y < h; y++) {
-    push(0, y);
-    push(w - 1, y);
-  }
-  while (stack.length) {
-    const i = stack.pop();
-    const x = i % w;
-    const y = (i - x) / w;
-    push(x + 1, y);
-    push(x - 1, y);
-    push(x, y + 1);
-    push(x, y - 1);
-  }
+  const outside = floodOutside(dilate(far, w, h, 2), w, h);
   const gone = dilate(outside, w, h, 2);
   for (let i = 0; i < w * h; i++) img.data[i * 4 + 3] = gone[i] ? 0 : 255;
   // O contorno encostado no fundo fica meio transparente, para não deixar halo.
@@ -396,97 +447,35 @@ function recolor(img, from, to) {
   return out;
 }
 
-/** A chama fica transparente onde não é fogo: o chão por baixo some. */
-function keyFlame(img) {
-  for (let y = 0; y < img.height; y++) {
-    for (let x = 0; x < img.width; x++) {
-      const i = (y * img.width + x) * 4;
-      const [h, s, v] = rgbToHsv(img.data[i], img.data[i + 1], img.data[i + 2]);
-      const warm = h < 70 || h > 330;
-      const fire = warm ? Math.min(1, (s - 0.3) / 0.25) * Math.min(1, (v - 0.45) / 0.2) : 0;
-      // O miolo quase branco não tem saturação, mas é fogo também.
-      const core = Math.min(1, (v - 0.8) / 0.1);
-      const a = Math.max(0, fire, core);
-      // Resto fraco do chão e do tijolo da referência: some, senão vira um retângulo em volta da chama.
-      img.data[i + 3] = a < 0.3 ? 0 : Math.round(255 * a);
-    }
-  }
-  return img;
-}
-
 /**
- * Emenda de chama: na faixa de `band` px junto da borda `side` ("l", "r", "t"
- * ou "b"), a imagem passa aos poucos para `edge` (a linha ou coluna da borda
- * do vizinho, de fora para dentro igual à ordem da borda). Na borda fica
- * igual ao vizinho; `band` px para dentro, igual ao original.
+ * As folhas da bomba, da explosão e dos itens têm fundo em degradê, com um
+ * brilho em volta de cada sprite: não há UMA cor de fundo para inundar. Mas o
+ * sprite é pixel art de borda dura e o fundo é liso; então a tinta é onde a
+ * cor muda de repente (o contorno, os detalhes, as faíscas) ou, a partir de
+ * `bright`, onde o canal mais fraco é claro (o miolo do fogo, que o degradê
+ * laranja do fundo nunca alcança). O fundo é o que a inundação a partir das
+ * bordas da janela alcança sem cruzar tinta engordada em 2 px; o que ela não
+ * alcança (o miolo liso da bomba, o fogo) fica opaco, seja da cor que for.
  */
-function blendEdge(img, side, edge, band) {
-  const out = crop(img, 0, 0, img.width, img.height);
-  const { width: w, height: h } = img;
-  for (let d = 0; d < band; d++) {
-    const t = 1 - d / band;
-    const n = side === "l" || side === "r" ? h : w;
-    for (let k = 0; k < n; k++) {
-      const x = side === "l" ? d : side === "r" ? w - 1 - d : k;
-      const y = side === "t" ? d : side === "b" ? h - 1 - d : k;
-      const i = (y * w + x) * 4;
-      const e = edge[k];
-      // Mistura com alfa pré-multiplicado, para a cor do fundo transparente não sujar a borda.
-      const a0 = out.data[i + 3] / 255;
-      const a1 = e[3] / 255;
-      const a = a0 * (1 - t) + a1 * t;
-      for (let c = 0; c < 3; c++) {
-        const v = out.data[i + c] * a0 * (1 - t) + e[c] * a1 * t;
-        out.data[i + c] = a > 0 ? Math.round(v / a) : 0;
-      }
-      out.data[i + 3] = Math.round(255 * a);
+const INK_EDGE = 45;
+function keyGradient(src, x, y, w, h, bright = 256) {
+  const img = crop(src, x, y, w, h);
+  const ink = new Uint8Array(w * h);
+  for (let yy = 0; yy < h; yy++) {
+    for (let xx = 0; xx < w; xx++) {
+      const c = px(img, xx, yy);
+      const l = px(img, Math.max(0, xx - 1), yy);
+      const u = px(img, xx, Math.max(0, yy - 1));
+      const change =
+        Math.abs(c[0] - l[0]) + Math.abs(c[1] - l[1]) + Math.abs(c[2] - l[2]) +
+        Math.abs(c[0] - u[0]) + Math.abs(c[1] - u[1]) + Math.abs(c[2] - u[2]);
+      if (change > INK_EDGE || Math.min(c[0], c[1], c[2]) >= bright) ink[yy * w + xx] = 1;
     }
   }
-  return out;
-}
-const column = (img, x) => Array.from({ length: img.height }, (_, y) => px(img, x, y));
-const row = (img, y) => Array.from({ length: img.width }, (_, x) => px(img, x, y));
-
-/** Um braço que emenda nele mesmo: a borda esquerda e a direita viram a mesma coluna (a do meio). */
-function seamlessH(img) {
-  const { width: w } = img;
-  const half = Math.floor(w / 2);
-  const shifted = blank(w, img.height);
-  for (let y = 0; y < img.height; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = (y * w + ((x + half) % w)) * 4;
-      shifted.data.set(img.data.subarray(i, i + 4), (y * w + x) * 4);
-    }
-  }
-  // `shifted` emenda nas bordas (lá estava o meio do original); o original não tem
-  // costura no meio. Junta os dois: perto das bordas vale o deslocado, no meio o original.
-  const out = crop(img, 0, 0, w, img.height);
-  for (let y = 0; y < img.height; y++) {
-    for (let x = 0; x < w; x++) {
-      const t = Math.abs(x - (w - 1) / 2) / ((w - 1) / 2); // 0 no meio, 1 nas bordas
-      const i = (y * w + x) * 4;
-      const a0 = img.data[i + 3] / 255;
-      const a1 = shifted.data[i + 3] / 255;
-      const a = a0 * (1 - t) + a1 * t;
-      for (let c = 0; c < 3; c++) {
-        const v = img.data[i + c] * a0 * (1 - t) + shifted.data[i + c] * a1 * t;
-        out.data[i + c] = a > 0 ? Math.round(v / a) : 0;
-      }
-      out.data[i + 3] = Math.round(255 * a);
-    }
-  }
-  return out;
-}
-
-/** A chama "alternativa": a mesma, um pouco mais clara, para piscar. */
-function brighten(img, k) {
-  const out = crop(img, 0, 0, img.width, img.height);
-  for (let i = 0; i < out.data.length; i += 4) {
-    out.data[i] = Math.min(255, Math.round(out.data[i] + (255 - out.data[i]) * k));
-    out.data[i + 1] = Math.min(255, Math.round(out.data[i + 1] + (255 - out.data[i + 1]) * k));
-    out.data[i + 2] = Math.min(255, Math.round(out.data[i + 2] + (255 - out.data[i + 2]) * k));
-  }
-  return out;
+  const outside = floodOutside(dilate(ink, w, h, 2), w, h);
+  const gone = dilate(outside, w, h, 2);
+  for (let i = 0; i < w * h; i++) img.data[i * 4 + 3] = gone[i] ? 0 : 255;
+  return img;
 }
 
 /* ------------------------------------------------------------- os recortes */
@@ -504,61 +493,287 @@ for (let i = 3; i < heartEmpty.data.length; i += 4) heartEmpty.data[i] = heartFu
 add("heart", trim(heartFull));
 add("heart_empty", trim(heartEmpty));
 
-/* A chama: a cruz da arena tem o centro em (475, 538). Cada pedaço é uma
- * célula de 80×56 em volta desse centro. O braço esquerdo é o limpo (os
- * outros têm entulho de tijolo e o de cima afina), então os demais são o
- * espelho e o giro dele. */
-const FX = 475;
-const FY = 538;
-const flamePiece = (x, y, w, h) => resize(keyFlame(crop(arena, x, y, w, h)), TILE, TILE);
-/* Recortados um a um, os pedaços não emendavam: o contorno do fogo acabava
- * reto na borda da célula e a grossura mudava de um para o outro. Então o
- * braço vira um ladrilho que emenda nele mesmo, e cada borda que encosta num
- * braço (o centro dos quatro lados, a ponta do lado de dentro) passa aos
- * poucos para a borda do braço. */
-const FLAME_BAND = 20;
-const flameH = seamlessH(flamePiece(FX - 80, FY - 28, 42, 56));
-const flameV = rotate(flameH);
-let flameCenter = flamePiece(FX - 40, FY - 28, 80, 56);
-flameCenter = blendEdge(flameCenter, "l", column(flameH, TILE - 1), FLAME_BAND);
-flameCenter = blendEdge(flameCenter, "r", column(flameH, 0), FLAME_BAND);
-flameCenter = blendEdge(flameCenter, "t", row(flameV, TILE - 1), FLAME_BAND);
-flameCenter = blendEdge(flameCenter, "b", row(flameV, 0), FLAME_BAND);
-const flameL = blendEdge(flamePiece(FX - 118, FY - 28, 80, 56), "r", column(flameH, 0), FLAME_BAND);
-const flameU = rotate(flameL);
-const flames = {
-  flame_center: flameCenter,
-  flame_h: flameH,
-  flame_v: flameV,
-  flame_l: flameL,
-  flame_r: mirror(flameL),
-  flame_u: flameU,
-  flame_d: flipV(flameU),
-};
-for (const [name, img] of Object.entries(flames)) {
-  add(name, img);
-  add(`${name}_alt`, brighten(img, 0.18));
-}
-
 /* A folha de sprites: fundo liso que sai por inundação. */
 const sheetBg = px(sheet, 4, 4);
 const cut = (x, y, w, h) => trim(keyFlood(crop(sheet, x, y, w, h), sheetBg, 24), 1);
 
-/* As bombas: cinco quadros do pavio queimando. Ficam no tamanho da folha,
- * encostadas no chão da célula. */
-const BOMBS = [
-  [30, 848, 60, 86],
-  [99, 848, 60, 86],
-  [165, 848, 60, 86],
-  [232, 848, 60, 86],
-  [297, 848, 60, 86],
+/* A caveirinha da maldição: 7×6 lógicos pintados em código, em pixels de
+ * ART de lado, para pairar sobre a cabeça de quem pegou a caveira. Osso
+ * claro, olhos no roxo do item. */
+const CURSE_MARK = [
+  "..XXX..",
+  ".XXXXX.",
+  "XXoXoXX",
+  "XXXXXXX",
+  ".XXXXX.",
+  ".X.X.X.",
 ];
-BOMBS.forEach(([x, y, w, h], i) => add(`bomb${i}`, place(cut(x, y, w, h), TILE, 20 * ART, true)));
+const CURSE_INK = { X: [240, 236, 226, 255], o: [58, 24, 84, 255] };
+{
+  const img = blank(CURSE_MARK[0].length * ART, CURSE_MARK.length * ART);
+  CURSE_MARK.forEach((line, py) => {
+    [...line].forEach((ch, px2) => {
+      const ink = CURSE_INK[ch];
+      if (!ink) return;
+      for (let y = 0; y < ART; y++) {
+        for (let x = 0; x < ART; x++) img.data.set(ink, ((py * ART + y) * img.width + px2 * ART + x) * 4);
+      }
+    });
+  });
+  add("curse", img);
+}
 
-/* Os itens: fogo, bomba, bota e caveira, em moldura dourada ou azul. */
-const POWERUPS = { fire: [1209, 851], bomb: [1286, 851], boot: [1360, 851], skull: [1434, 851] };
-for (const [kind, [x, y]] of Object.entries(POWERUPS)) {
-  add(`pu_${kind}`, place(fit(cut(x, y, 76, 76), TILE - 4, TILE - 4), TILE, TILE));
+/* ------------------------------------------- a bomba, a explosão e os itens */
+
+/* A bomba: a folha tem a parada, o pavio em seis quadros, o pulso em oito e o
+ * estouro em dois, numa grade que não é exata — as janelas abaixo passam no
+ * meio dos vãos medidos. Todos os quadros numa só escala, a do corpo da bomba
+ * parada (12 px lógicos de largura, um pouco menos que a bomba antiga), de pé no chão de uma
+ * célula de 24 lógicos de altura: as faíscas sobem acima da bomba. */
+const BOMB_ROWS = [
+  [20, 175],
+  [175, 316],
+  [316, 470],
+];
+const BOMB_COLS = [
+  [0, 113],
+  [113, 226],
+  [226, 327],
+  [327, 434],
+  [434, 541],
+  [541, 647],
+  [647, 755],
+  [755, 860],
+];
+/** Cada fase: a linha da folha, a primeira coluna e quantos quadros. */
+const BOMB_PHASES = [
+  ["idle", 0, 0, 1],
+  ["fuse", 0, 1, 6],
+  ["pulse", 1, 0, 8],
+  ["boom", 2, 0, 2],
+];
+const BOMB_W = 12 * ART;
+const BOMB_H = 24 * ART;
+const bombCell = (row, col) => {
+  const [y0, y1] = BOMB_ROWS[row];
+  const [x0, x1] = BOMB_COLS[col];
+  return trim(keyGradient(bombSheet, x0, y0, x1 - x0, y1 - y0));
+};
+/** A largura e o meio do que há entre as linhas `y0` e `y1` de um quadro: a faixa do corpo. */
+function bodySpan(img, y0, y1) {
+  let x0 = img.width;
+  let x1 = -1;
+  for (let y = Math.max(0, Math.floor(y0)); y < Math.min(img.height, Math.ceil(y1)); y++) {
+    for (let x = 0; x < img.width; x++) {
+      if (img.data[(y * img.width + x) * 4 + 3] === 0) continue;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+    }
+  }
+  return { width: x1 - x0 + 1, center: (x0 + x1 + 1) / 2 };
+}
+/** O meio do corpo da bomba comum: as faíscas pendem para um lado, então o corpo é o que fica nas últimas linhas. */
+const bodyCenter = (img) => bodySpan(img, img.height - 12, img.height).center;
+const BOMB_SCALE = BOMB_W / bombCell(0, 0).width;
+for (const [phase, row, first, count] of BOMB_PHASES) {
+  for (let i = 0; i < count; i++) {
+    const img = scaleBy(bombCell(row, first + i), BOMB_SCALE);
+    const out = blank(TILE, BOMB_H);
+    paste(out, img, Math.round(TILE / 2 - bodyCenter(img)), BOMB_H - img.height);
+    add(`bomb_${phase}${i}`, out);
+  }
+}
+
+/* A bomba perfurante: folha própria (2048×768), vermelha e com uma ponta
+ * dourada para baixo e para a direita, nas mesmas fases e na mesma ordem da
+ * bomba comum. A ponta sai do corpo, então o corpo não é a caixa justa do
+ * quadro: é a faixa da esfera, entre 45% e 60% da altura contados do chão
+ * (acima da ponta, abaixo do pavio). É por ela que a bomba ganha a escala e o
+ * centro, para a esfera ficar do tamanho e no lugar da bomba comum. */
+const PIERCE_ROWS = [
+  [10, 255],
+  [255, 505],
+  [505, 760],
+];
+const PIERCE_COLS = [
+  [0, 258],
+  [258, 516],
+  [516, 775],
+  [775, 1034],
+  [1034, 1292],
+  [1292, 1550],
+  [1550, 1809],
+  [1809, 2048],
+];
+const pierceCell = (row, col) => {
+  const [y0, y1] = PIERCE_ROWS[row];
+  const [x0, x1] = PIERCE_COLS[col];
+  return trim(keyGradient(pierceSheet, x0, y0, x1 - x0, y1 - y0));
+};
+const sphere = (img) => bodySpan(img, img.height * 0.4, img.height * 0.55);
+const PIERCE_SCALE = BOMB_W / sphere(pierceCell(0, 0)).width;
+for (const [phase, row, first, count] of BOMB_PHASES) {
+  for (let i = 0; i < count; i++) {
+    const img = scaleBy(pierceCell(row, first + i), PIERCE_SCALE);
+    const out = blank(TILE, BOMB_H);
+    paste(out, img, Math.round(TILE / 2 - sphere(img).center), BOMB_H - img.height);
+    add(`pierce_${phase}${i}`, out);
+  }
+}
+
+/* A explosão modular: uma coluna por peça (o centro, o braço horizontal, o
+ * vertical, as pontas esquerda, direita, de cima e de baixo; as duas últimas
+ * colunas da folha são enfeites que não entram) e uma linha por quadro. A
+ * célula da folha mede o que o braço mede no auge: é essa a escala da
+ * grossura de tudo. Na folha só os quadros 3 e 4 chegam à borda da célula; os
+ * outros ficam curtos (de 45% a 92%) e a cruz aparecia em pedaços soltos
+ * metade do tempo. Então cada braço e cada ponta é esticado ao longo do seu
+ * eixo até a lajota inteira em todo quadro que tenha fogo (a brasa final, o
+ * quadro 7, fica solta como é). Mas o braço é uma lente, que afina até uma
+ * ponta na borda: duas lajotas encostavam ponta com ponta e a cruz continuava
+ * parecendo losangos soltos. Então o braço emenda nele mesmo, como a chama da
+ * arena antiga fazia: é a união da lente com ela mesma deslocada meia lajota
+ * (uma lente centrada na emenda) — na borda fica tão grosso quanto no meio, e
+ * qualquer braço encosta em qualquer outro. O centro é a união dos dois
+ * braços do quadro (a grossura na emenda bate por construção, e a estrela de
+ * quatro pontas é o que a união de duas lentes dá), e a ponta ganha a meia
+ * lente do braço do lado de dentro, para encostar com a mesma grossura. */
+const EXPLOSION_COLS = [
+  [25, 171],
+  [171, 312],
+  [314, 430],
+  [430, 566],
+  [566, 702],
+  [702, 830],
+  [830, 960],
+];
+const EXPLOSION_ROWS = [
+  [20, 118],
+  [118, 240],
+  [240, 363],
+  [363, 495],
+  [495, 628],
+  [628, 755],
+  [755, 872],
+  [872, 975],
+];
+const EXPLOSION_PIECES = { h: 1, v: 2, l: 3, r: 4, u: 5, d: 6 };
+const FIRE_BRIGHT = 120;
+const explosionCell = (col, row) => {
+  const [y0, y1] = EXPLOSION_ROWS[row];
+  const [x0, x1] = EXPLOSION_COLS[col];
+  return trim(keyGradient(explosionSheet, x0, y0, x1 - x0, y1 - y0, FIRE_BRIGHT));
+};
+const EXPLOSION_CELL = Math.max(explosionCell(1, 3).width, explosionCell(2, 3).height);
+const EXPLOSION_SCALE = TILE / EXPLOSION_CELL;
+/** Um quadro cujo braço horizontal fica abaixo disso é brasa solta, não chama: nada nele estica. */
+const STRETCH_FROM = 0.4;
+/** A peça numa lajota: esticada ao longo do eixo (`"x"` ou `"y"`) até a borda, ou centrada se for brasa. */
+function explosionPiece(cell, axis, stretch) {
+  const w = axis === "x" && stretch ? TILE : Math.round(cell.width * EXPLOSION_SCALE);
+  const h = axis === "y" && stretch ? TILE : Math.round(cell.height * EXPLOSION_SCALE);
+  return place(resize(cell, Math.max(1, w), Math.max(1, h)), TILE, TILE);
+}
+/** A união de duas peças do mesmo tamanho: onde as duas têm fogo, fica a mais clara. */
+function union(a, b) {
+  const out = crop(a, 0, 0, a.width, a.height);
+  for (let i = 0; i < out.data.length; i += 4) {
+    const la = a.data[i] + a.data[i + 1] + a.data[i + 2];
+    const lb = b.data[i] + b.data[i + 1] + b.data[i + 2];
+    if (b.data[i + 3] > a.data[i + 3] || (b.data[i + 3] === a.data[i + 3] && lb > la)) {
+      out.data.set(b.data.subarray(i, i + 4), i);
+    }
+  }
+  return out;
+}
+/** A imagem deslocada meia lajota ao longo de `axis`, dando a volta: o meio vai para a borda. */
+function halfShift(img, axis) {
+  const out = blank(img.width, img.height);
+  for (let y = 0; y < img.height; y++) {
+    for (let x = 0; x < img.width; x++) {
+      const sx = axis === "x" ? (x + img.width / 2) % img.width : x;
+      const sy = axis === "y" ? (y + img.height / 2) % img.height : y;
+      const i = (sy * img.width + sx) * 4;
+      out.data.set(img.data.subarray(i, i + 4), (y * img.width + x) * 4);
+    }
+  }
+  return out;
+}
+/** Só a metade de `img` encostada no lado `side` ("l", "r", "t", "b"); o resto fica transparente. */
+function half(img, side) {
+  const out = blank(img.width, img.height);
+  for (let y = 0; y < img.height; y++) {
+    for (let x = 0; x < img.width; x++) {
+      const keep =
+        side === "l" ? x < img.width / 2 : side === "r" ? x >= img.width / 2 : side === "t" ? y < img.height / 2 : y >= img.height / 2;
+      if (!keep) continue;
+      const i = (y * img.width + x) * 4;
+      out.data.set(img.data.subarray(i, i + 4), i);
+    }
+  }
+  return out;
+}
+for (let row = 0; row < EXPLOSION_ROWS.length; row++) {
+  const cells = {};
+  for (const [piece, col] of Object.entries(EXPLOSION_PIECES)) cells[piece] = explosionCell(col, row);
+  // O quadro inteiro é fogo ou é brasa: a brasa (o quadro 7) não estica nem emenda, fica solta como é.
+  const fire = cells.h.width >= STRETCH_FROM * EXPLOSION_CELL;
+  const lensH = explosionPiece(cells.h, "x", fire);
+  const lensV = explosionPiece(cells.v, "y", fire);
+  const seamH = fire ? halfShift(lensH, "x") : blank(TILE, TILE);
+  const seamV = fire ? halfShift(lensV, "y") : blank(TILE, TILE);
+  const armH = union(lensH, seamH);
+  const armV = union(lensV, seamV);
+  add(`flame_h${row}`, armH);
+  add(`flame_v${row}`, armV);
+  add(`flame_center${row}`, union(armH, armV));
+  add(`flame_l${row}`, union(explosionPiece(cells.l, "x", fire), half(seamH, "r")));
+  add(`flame_r${row}`, union(explosionPiece(cells.r, "x", fire), half(seamH, "l")));
+  add(`flame_u${row}`, union(explosionPiece(cells.u, "y", fire), half(seamV, "b")));
+  add(`flame_d${row}`, union(explosionPiece(cells.d, "y", fire), half(seamV, "t")));
+}
+
+/* Os itens: uma coluna por item, quatro linhas de brilho, em moldura dourada
+ * (`bomb-items-sheet.png`, a de 11:56, que trouxe a caveira). Da folha entram só os que o jogo
+ * tem, que agora são todos: o fogo (alcance), a bomba (mais uma), a bota
+ * (rapidez), a perfurante, o chute e a caveira (a maldição). Cada item tem uma escala só (a do maior dos quatro quadros) e é
+ * recortado pelo mesmo retângulo nos quatro, para o brilho mudar sem o item
+ * sair do lugar. */
+const ITEM_COLS = [
+  [30, 275],
+  [275, 522],
+  [522, 768],
+  [768, 1015],
+  [1015, 1262],
+  [1262, 1508],
+];
+const ITEM_ROWS = [
+  [28, 264],
+  [264, 503],
+  [503, 741],
+  [741, 980],
+];
+const ITEMS = { fire: 0, bomb: 1, boot: 2, pierce: 3, kick: 4, skull: 5 };
+for (const [kind, col] of Object.entries(ITEMS)) {
+  const [x0, x1] = ITEM_COLS[col];
+  const cells = ITEM_ROWS.map(([y0, y1]) => keyGradient(itemSheet, x0, y0, x1 - x0, y1 - y0));
+  // O retângulo justo da união dos quatro quadros, em coordenadas da janela.
+  const box = { x0: Infinity, y0: Infinity, x1: -1, y1: -1 };
+  for (const cell of cells) {
+    for (let y = 0; y < cell.height; y++) {
+      for (let x = 0; x < cell.width; x++) {
+        if (cell.data[(y * cell.width + x) * 4 + 3] === 0) continue;
+        box.x0 = Math.min(box.x0, x);
+        box.y0 = Math.min(box.y0, y);
+        box.x1 = Math.max(box.x1, x);
+        box.y1 = Math.max(box.y1, y);
+      }
+    }
+  }
+  cells.forEach((cell, i) => {
+    const img = crop(cell, box.x0, box.y0, box.x1 - box.x0 + 1, box.y1 - box.y0 + 1);
+    add(`pu_${kind}${i}`, place(fit(img, TILE - 4, TILE - 4), TILE, TILE));
+  });
 }
 
 /* Os personagens: uma linha por cor, as colunas iguais. A linha é a faixa de
@@ -599,33 +814,7 @@ function keyWalk(src) {
   for (let i = 0; i < w * h; i++) {
     body[i] = Math.max(img.data[i * 4], img.data[i * 4 + 1], img.data[i * 4 + 2]) > WALK_BG_TOL ? 1 : 0;
   }
-  const sealed = dilate(body, w, h, WALK_OUTLINE);
-  const outside = new Uint8Array(w * h);
-  const stack = [];
-  const push = (x, y) => {
-    if (x < 0 || y < 0 || x >= w || y >= h) return;
-    const i = y * w + x;
-    if (outside[i] || sealed[i]) return;
-    outside[i] = 1;
-    stack.push(i);
-  };
-  for (let x = 0; x < w; x++) {
-    push(x, 0);
-    push(x, h - 1);
-  }
-  for (let y = 0; y < h; y++) {
-    push(0, y);
-    push(w - 1, y);
-  }
-  while (stack.length) {
-    const i = stack.pop();
-    const x = i % w;
-    const y = (i - x) / w;
-    push(x + 1, y);
-    push(x - 1, y);
-    push(x, y + 1);
-    push(x, y - 1);
-  }
+  const outside = floodOutside(dilate(body, w, h, WALK_OUTLINE), w, h);
   for (let i = 0; i < w * h; i++) img.data[i * 4 + 3] = outside[i] ? 0 : 255;
   return img;
 }
@@ -676,9 +865,105 @@ function walkFrames(sheet, idle) {
   }
   return [...all.slice(idle), ...all.slice(0, idle)];
 }
-/* O cenário é desenhado em código (`scenery.cjs`): o chão, a grama, os
- * canteiros, os blocos, a muralha, os cantos, as árvores e o banco. */
-for (const [name, img] of Object.entries(paintScenery())) add(name, img);
+/* ---------------------------------------------------------------- o cenário */
+
+/*
+ * O tileset do cenário (1536×1024) é gerado por IA e não está numa grade
+ * exata: as lajotas têm ~68 px, os tijolos ~60 num passo de ~76, a muralha
+ * ~70. Cada peça foi medida uma a uma, pelas faixas de alfa entre as peças e
+ * pelas juntas escuras entre as lajotas. O que é opaco vem com alfa ~249 (a
+ * imagem inteira tem um véu), então o alfa sobe para 255 antes do recorte.
+ */
+for (let i = 3; i < tileset.data.length; i += 4) tileset.data[i] = Math.min(255, Math.round((tileset.data[i] * 255) / 249));
+const tile = (x, y, w, h) => crop(tileset, x, y, w, h);
+
+/* O chão: duas fileiras de 22 lajotas, recortadas de junta a junta. A junta
+ * escura fica na coluna e na linha 0 de cada lajota, como no chão pintado:
+ * qualquer uma encosta em qualquer outra e a junta sai única. */
+const FLOOR_X = [11, 75, 143, 210, 280, 345, 413, 482, 552, 626, 695, 767, 835, 903, 978, 1048, 1118, 1188, 1257, 1326, 1393, 1461, 1525];
+const FLOOR_Y = [10, 78, 145];
+let floorCount = 0;
+for (let r = 0; r < FLOOR_Y.length - 1; r++) {
+  for (let c = 0; c < FLOOR_X.length - 1; c++) {
+    const img = resize(tile(FLOOR_X[c], FLOOR_Y[r], FLOOR_X[c + 1] - FLOOR_X[c], FLOOR_Y[r + 1] - FLOOR_Y[r]), TILE, TILE);
+    for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
+    add(`floor${floorCount++}`, img);
+  }
+}
+
+/* Os tijolos: duas fileiras de 20, cada um com o seu musgo; o pilar: um só
+ * (os 20 da fileira são iguais). Na referência o bloco enche a célula de alto
+ * a baixo e deixa uma fresta de chão nos lados: cabe em 60×64, no chão da célula. */
+const BRICK_X = [12, 86, 161, 240, 316, 395, 471, 550, 624, 701, 775, 851, 928, 1006, 1083, 1160, 1236, 1312, 1388, 1464];
+const BRICK_W = 61;
+let brickCount = 0;
+for (const y of [445, 515]) {
+  for (const x of BRICK_X) add(`brick${brickCount++}`, place(fit(tile(x, y, BRICK_W, 64), 60, TILE), TILE, TILE, true));
+}
+add("pillar", place(fit(tile(15, 378, 56, 59), 60, TILE), TILE, TILE, true));
+
+/* A muralha de cima e a de baixo: duas pedras da fieira de cima e as duas
+ * fieiras da frente, de uma peça lisa (sem merlão). O corte é na junta, então
+ * a peça emenda com ela mesma: a fieira de baixo fica em aparelho corrido. */
+const wallTile = resize(tile(1118, 316, 50, 52), TILE, TILE);
+for (let i = 3; i < wallTile.data.length; i += 4) wallTile.data[i] = 255;
+add("wall_t", wallTile);
+add("wall_b", wallTile);
+
+/* A muralha dos lados, como a referência a mostra: do lado de fora, uma
+ * coluna de pedras (a da coluna curta que dá o bloco claro, esticada à
+ * célula) em que os blocos claros se apoiam; do lado de dentro, a frente da
+ * muralha girada, com as pedras miúdas correndo na vertical. A da direita é
+ * o espelho da esquerda. */
+const SIDE_OUT = 33;
+const WALL_TOP_ROWS = Math.round((27 / 52) * TILE); // a fieira clara ocupa 27 dos 52 px da peça
+const sideStones = resize(tile(781, 180, 31, 37), SIDE_OUT, TILE);
+const sideFront = rotate(rotate(rotate(crop(wallTile, 0, WALL_TOP_ROWS, TILE, TILE - WALL_TOP_ROWS))));
+const wallLeft = blank(TILE, TILE);
+paste(wallLeft, sideStones, 0, 0);
+paste(wallLeft, sideFront, SIDE_OUT, 0);
+for (let i = 3; i < wallLeft.data.length; i += 4) wallLeft.data[i] = 255;
+add("wall_l", wallLeft);
+add("wall_r", mirror(wallLeft));
+
+/* O merlão: a coluna que sobe da muralha de cima e da de baixo, com a face
+ * clara em cima e as pedras até o chão da muralha. Vem da muralha longa de
+ * três merlões; na referência ele mede 0,43 célula de largura por 1,3 de
+ * altura. A face que coroa a muralha dos lados é só o bloco claro de uma
+ * coluna curta, deitado para fora. */
+const merlon = resize(tile(29, 224, 24, 68), 28, 84);
+add("orn_t0_0", merlon);
+add("orn_b0_0", merlon);
+const cap = resize(tile(781, 149, 31, 30), 34, 30);
+add("orn_l0_0", cap);
+add("orn_r0_0", mirror(cap));
+/* Como a referência coroa a muralha: uma série de merlões em cima e embaixo e uma de blocos nos lados, a cada
+ * célula e meia, a duas células do canto; os blocos dos lados encostam na borda de fora. */
+const GARDEN_WALLS = {
+  bottom: "same",
+  top: [{ pitch: 1.5, margin: 2, pieces: 1, center: false, skipCenter: false }],
+  side: [{ pitch: 1.5, margin: 2, pieces: 1, center: false, skipCenter: false }],
+  sideAnchor: "outer",
+};
+
+/* O canto: o bloco quadrado grande, com a moldura e a base. Na referência ele
+ * passa um pouco da célula da muralha para fora e para cima. */
+add("corner", resize(tile(973, 225, 56, 65), 72, 84));
+
+/* A moita é a única peça ainda desenhada em código: o tileset não tem uma. */
+add("bush", paintScenery().bush);
+const VARIANTS = { floor: floorCount, brick: brickCount };
+
+/* Os temas novos: cada tileset dá as mesmas peças, com o nome do tema na frente. */
+const THEME_VARIANTS = {};
+THEME_ORDER.forEach((id, i) => {
+  const sheet = PNG.sync.read(fs.readFileSync(themePaths[i]));
+  if (sheet.width !== 1536 || sheet.height !== 1024) throw new Error(`o tileset de ${id} tem de medir 1536×1024`);
+  const cut = cutTheme(id, sheet, { TILE, crop, resize, fit, place, mirror, rotate, blank, paste });
+  for (const [name, img] of cut.frames) add(name, img);
+  THEME_VARIANTS[id] = { ...cut.variants, walls: { ...cut.walls, sideAnchor: "center" } };
+});
+if (Object.keys(THEMES).length !== THEME_ORDER.length) throw new Error("há tema sem tileset na linha de comando");
 
 const downFrames = walkFrames(downSheet, 0);
 const upFrames = walkFrames(upSheet, 0);
@@ -749,7 +1034,8 @@ DEATH.forEach(([x, y, w, h], i) => {
 
 /* ---------------------------------------------------------------- o atlas */
 
-const ATLAS_W = 1024;
+/* Com os seis temas o atlas tem ~1400 quadros: em 2048 de largura fica mais quadrado que comprido. */
+const ATLAS_W = 2048;
 const GAP = 2;
 const entries = [...frames.entries()].sort((a, b) => b[1].height - a[1].height || a[0].localeCompare(b[0]));
 let cx = GAP;
@@ -776,6 +1062,17 @@ for (const [name, img] of entries) {
   }
 }
 
+/* Onde começa a cabeça no quadro do boneco: a primeira linha com pixel do
+ * parado de frente, em pixels lógicos. O quadro tem folga em cima, e a
+ * caveirinha da maldição encosta na cabeça, não na folga. */
+function headTop(img) {
+  for (let y = 0; y < img.height; y++) {
+    for (let x = 0; x < img.width; x++) if (img.data[(y * img.width + x) * 4 + 3] > 40) return Math.floor(y / ART);
+  }
+  return 0;
+}
+const HEAD_TOP = headTop(frames.get("c0_idle_down0"));
+
 const outDir = path.join(__dirname, "..", "src", "art");
 fs.writeFileSync(path.join(outDir, "atlas.png"), PNG.sync.write(atlas));
 fs.writeFileSync(
@@ -787,9 +1084,12 @@ fs.writeFileSync(
       idle: IDLE,
       win: winFrames.length,
       variants: VARIANTS,
+      walls: GARDEN_WALLS,
+      themes: THEME_VARIANTS,
       walkArtHeight: WALK_ART_HEIGHT,
       idleArtHeight: IDLE_ART_HEIGHT,
       winArtHeight: artHeight(winFrames),
+      headTop: HEAD_TOP,
       frames: placed,
     },
     null,

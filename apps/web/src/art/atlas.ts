@@ -2,7 +2,7 @@ import atlasUrl from "./atlas.png";
 import atlasData from "./atlas.json";
 
 /*
- * O atlas: a arte é recortada das duas imagens de referência por
+ * O atlas: a arte é recortada das imagens de referência por
  * `scripts/build-atlas.cjs` e guardada em `atlas.png`, em 4 px de arte por
  * pixel lógico (uma célula de 16 px tem 64 px de arte). Cada quadro vira um
  * canvas próprio na primeira vez em que é pedido; a imagem chega depois
@@ -111,68 +111,117 @@ export function characterPose(slot: number, pose: Pose): Frame {
 
 /* ---------------------------------------------------------------- blocos */
 
-const VARIANTS: { floor: number; garden: number; tree: number } = atlasData.variants;
-export type Scenery = keyof typeof VARIANTS;
-/** Quantas versões tem uma peça do cenário (chão, canteiro, árvore). */
-export const variants = (kind: Scenery): number => VARIANTS[kind];
-
-/** Um número fixo por célula, para variar o cenário sem mudar de um quadro para o outro. */
-export function cellHash(cx: number, cy: number): number {
-  let h = Math.imul(cx + 101, 374761393) ^ Math.imul(cy + 37, 668265263);
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-}
-
 /**
- * O chão de uma célula: a lajota lisa (a 0) na maioria, as outras versões
- * (rachada, com musgo, de pedra) salpicadas.
+ * As peças do cenário existem para cada tema: as da referência ("garden")
+ * com o nome de sempre (`floor0`, `wall_t`…), as dos outros com o nome do
+ * tema na frente (`forest_floor0`, `forest_wall_t`…). Um tema que o atlas
+ * não tem desenha como a referência: a tela nunca fica sem peça.
  */
-export function floor(cx: number, cy: number): Frame {
-  const r = cellHash(cx, cy);
-  const n = VARIANTS.floor;
-  const i = r < 0.6 || n === 1 ? 0 : 1 + Math.floor(((r - 0.6) / 0.4) * (n - 1));
-  return frame(`floor${Math.min(n - 1, i)}`);
-}
-export const garden = (cx: number, cy: number) => frame(`garden${Math.floor(cellHash(cx, cy) * VARIANTS.garden)}`);
-export const tree = (cx: number, cy: number) => frame(`tree${Math.floor(cellHash(cx, cy) * VARIANTS.tree)}`);
-export const pillar = () => frame("pillar");
-export const brick = () => frame("brick");
+export const GARDEN = "garden";
+const VARIANTS: { floor: number; brick: number } = atlasData.variants;
+/** Uma série de ornamentos da muralha: o passo e a folga do canto (em células), quantas peças se alternam a partir do centro, se há peça central e se o centro fica vazio. */
+export type OrnamentSeries = { pitch: number; margin: number; pieces: number; center: boolean; skipCenter: boolean };
+/** Como a muralha de um tema é coroada: as séries de cima (e de baixo) e as dos lados; a de baixo é a de cima ou o espelho dela. */
+export type WallArt = { bottom: "same" | "mirror"; top: OrnamentSeries[]; side: OrnamentSeries[]; sideAnchor: "outer" | "center" };
+type ThemeMeta = { floor: number; brick: number; walls: WallArt };
+const THEME_VARIANTS: Record<string, ThemeMeta> = {
+  [GARDEN]: { ...VARIANTS, walls: atlasData.walls as WallArt },
+  ...(atlasData.themes as Record<string, ThemeMeta>),
+};
+export type Scenery = keyof typeof VARIANTS;
+/** Os temas que o atlas tem peças para desenhar. */
+export const ATLAS_THEMES: readonly string[] = Object.keys(THEME_VARIANTS);
+/** O tema como o atlas o conhece: ele mesmo, ou a referência se não está no atlas. */
+export const atlasTheme = (theme: string = GARDEN): string => (THEME_VARIANTS[theme] ? theme : GARDEN);
+const prefix = (theme: string) => (atlasTheme(theme) === GARDEN ? "" : `${atlasTheme(theme)}_`);
+/** Quantas versões tem uma peça do cenário (lajota, tijolo) num tema. */
+export const variants = (kind: Scenery, theme: string = GARDEN): number => THEME_VARIANTS[atlasTheme(theme)][kind];
+
+const variant = (kind: Scenery, i: number, theme: string) =>
+  `${prefix(theme)}${kind}${Math.min(variants(kind, theme) - 1, Math.max(0, Math.floor(i)))}`;
+
+/** Uma das lajotas do chão; qual vai em cada célula é o `themes.ts` quem diz. */
+export const floor = (i: number, theme = GARDEN) => frame(variant("floor", i, theme));
+/** Um dos tijolos, cada um com o seu musgo. */
+export const brick = (i: number, theme = GARDEN) => frame(variant("brick", i, theme));
+export const pillar = (theme = GARDEN) => frame(`${prefix(theme)}pillar`);
 export const bush = () => frame("bush");
-/** O canto da muralha, com a lanterna: o da esquerda ou o da direita (espelhado). */
-export const corner = (side: "l" | "r") => frame(`corner_${side}`);
-export const bench = () => frame("bench");
+/** O bloco quadrado dos quatro cantos da muralha. */
+export const corner = (theme = GARDEN) => frame(`${prefix(theme)}corner`);
 
 export type WallSide = "t" | "b" | "l" | "r";
-export const wall = (side: WallSide) => frame(`wall_${side}`);
+export const wall = (side: WallSide, theme = GARDEN) => frame(`${prefix(theme)}wall_${side}`);
+
+/** Como a muralha do tema é coroada (ver `WallArt`). */
+export const walls = (theme: string = GARDEN): WallArt => THEME_VARIANTS[atlasTheme(theme)].walls;
+/** Um ornamento da muralha: o lado, a série, e a peça (pelo lugar a partir do centro) ou a central (`"c"`). */
+export const ornament = (side: WallSide, series: number, piece: number | "c", theme = GARDEN) =>
+  frame(`${prefix(theme)}orn_${side}${series}_${piece}`);
+
+/** Toda peça de cenário de um tema, com o nome que tem no atlas. */
+export function sceneryFrames(theme: string = GARDEN): string[] {
+  const p = prefix(theme);
+  const names = [`${p}pillar`, `${p}corner`, `${p}wall_t`, `${p}wall_b`, `${p}wall_l`, `${p}wall_r`];
+  for (const kind of ["floor", "brick"] as const) {
+    for (let i = 0; i < variants(kind, theme); i++) names.push(`${p}${kind}${i}`);
+  }
+  const art = walls(theme);
+  for (const [sides, list] of [[["t", "b"], art.top], [["l", "r"], art.side]] as const) {
+    list.forEach((series, s) => {
+      for (const side of sides) {
+        for (let k = 0; k < series.pieces; k++) names.push(`${p}orn_${side}${s}_${k}`);
+        if (series.center) names.push(`${p}orn_${side}${s}_c`);
+      }
+    });
+  }
+  return names;
+}
 
 /* --------------------------------------------------------- bomba e chama */
 
-export const BOMB_FRAMES = 5;
-export const bomb = (step: number) => frame(`bomb${wrap(step, BOMB_FRAMES)}`);
+/** As fases da bomba e quantos quadros tem cada uma: parada, o pavio (volta), o pulso e o estouro. */
+export type BombPhase = "idle" | "fuse" | "pulse" | "boom";
+export const BOMB_STEPS: Record<BombPhase, number> = { idle: 1, fuse: 6, pulse: 8, boom: 2 };
+/** Um quadro da bomba; a perfurante é a mesma bomba em vermelho. */
+export const bomb = (phase: BombPhase, step: number, pierce = false) =>
+  frame(`${pierce ? "pierce" : "bomb"}_${phase}${wrap(step, BOMB_STEPS[phase])}`);
 
+/** A explosão é modular: o centro, os braços e as quatro pontas, todos nos mesmos oito quadros. */
 export type FlamePiece = "center" | "h" | "v" | "l" | "r" | "u" | "d";
-export const flame = (piece: FlamePiece, alt: boolean) => frame(`flame_${piece}${alt ? "_alt" : ""}`);
+export const FLAME_PIECES: FlamePiece[] = ["center", "h", "v", "l", "r", "u", "d"];
+export const FLAME_STEPS = 8;
+export const flame = (piece: FlamePiece, step: number) => frame(`flame_${piece}${wrap(step, FLAME_STEPS)}`);
 
 /* ---------------------------------------------------------------- itens */
 
-export const powerup = (kind: string) => frame(RECTS[`pu_${kind}`] ? `pu_${kind}` : "pu_fire");
+/** Cada item brilha em quatro quadros. */
+export const POWERUP_STEPS = 4;
+export const POWERUP_KINDS = ["fire", "bomb", "boot", "kick", "pierce", "skull"];
+export function powerup(kind: string, step: number): Frame {
+  const name = `pu_${POWERUP_KINDS.includes(kind) ? kind : "fire"}${wrap(step, POWERUP_STEPS)}`;
+  return frame(name);
+}
 export const heart = (full: boolean) => frame(full ? "heart" : "heart_empty");
+/** A caveirinha que paira sobre quem está amaldiçoado. */
+export const curse = () => frame("curse");
+/** Em que linha lógica do quadro do boneco começa a cabeça (o quadro tem folga em cima). */
+export const HEAD_TOP: number = atlasData.headTop;
 
 /* ------------------------------------------------------------- conferência */
 
 /** Todo quadro que a arena pede. Falta um e isso quebra aqui, não no meio do jogo. */
 export function requiredFrames(): string[] {
-  const names = [
-    "pillar", "brick", "bush", "grass", "corner_l", "corner_r", "bench",
-    "wall_t", "wall_b", "wall_l", "wall_r",
-    "heart", "heart_empty",
-    "pu_fire", "pu_bomb", "pu_boot", "pu_skull",
-  ];
-  for (const kind of ["floor", "garden", "tree"] as const) {
-    for (let i = 0; i < VARIANTS[kind]; i++) names.push(`${kind}${i}`);
+  const names = ["bush", "heart", "heart_empty", "curse"];
+  for (const theme of ATLAS_THEMES) names.push(...sceneryFrames(theme));
+  for (const kind of POWERUP_KINDS) {
+    for (let i = 0; i < POWERUP_STEPS; i++) names.push(`pu_${kind}${i}`);
   }
-  for (let i = 0; i < BOMB_FRAMES; i++) names.push(`bomb${i}`);
-  for (const piece of ["center", "h", "v", "l", "r", "u", "d"]) names.push(`flame_${piece}`, `flame_${piece}_alt`);
+  for (const [phase, steps] of Object.entries(BOMB_STEPS)) {
+    for (let i = 0; i < steps; i++) names.push(`bomb_${phase}${i}`, `pierce_${phase}${i}`);
+  }
+  for (const piece of FLAME_PIECES) {
+    for (let i = 0; i < FLAME_STEPS; i++) names.push(`flame_${piece}${i}`);
+  }
   for (let slot = 0; slot < 4; slot++) {
     for (const facing of ["down", "up", "left", "right"] as const) {
       for (let step = 0; step < WALK[facing]; step++) names.push(`c${slot}_${facing}${step}`);

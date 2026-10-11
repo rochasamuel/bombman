@@ -1,5 +1,5 @@
 import { ArraySchema, Schema, type } from "@colyseus/schema";
-import { COLS, DEFAULT_MAX_PLAYERS, MATCH_TIME, ROWS, type GamePhase } from "@bomb/shared";
+import { DEFAULT_ARENA, DEFAULT_MATCH_MINUTES, DEFAULT_MAX_PLAYERS, DEFAULT_THEME, MATCH_TIME, type GamePhase } from "@bomb/shared";
 
 /**
  * Tudo aqui é público e vai para todos os clientes da sala. O formato
@@ -22,6 +22,8 @@ export class PlayerState extends Schema {
   @type("uint8") range = 1;
   @type("uint8") bombs = 1;
   @type("uint8") speed = 0;
+  @type("boolean") kick = false;
+  @type("boolean") pierce = false;
   @type("boolean") invulnerable = false;
   @type("string") curse = "";
   @type("uint8") wins = 0;
@@ -31,13 +33,19 @@ export class BombState extends Schema {
   @type("string") id = "";
   @type("uint8") cx = 0;
   @type("uint8") cy = 0;
+  /** O centro, em células: muda enquanto desliza chutada. */
+  @type("float32") x = 0;
+  @type("float32") y = 0;
   @type("string") owner = "";
+  @type("boolean") pierce = false;
 }
 
 export class FlameState extends Schema {
   @type("uint8") cx = 0;
   @type("uint8") cy = 0;
   @type("uint8") kind = 0;
+  /** Quando acendeu, no relógio do motor: muda quando outra bomba reacende a célula. */
+  @type("uint32") born = 0;
 }
 
 export class PowerupState extends Schema {
@@ -51,8 +59,16 @@ export class ArenaRoomState extends Schema {
   @type("string") hostId = "";
   @type("string") phase: GamePhase = "lobby";
   @type("uint8") maxPlayers = DEFAULT_MAX_PLAYERS;
+  /** A arena da próxima rodada e o tamanho dela: a grade mede `cols × rows`. */
+  @type("string") arenaId = DEFAULT_ARENA.id;
+  @type("uint8") cols = DEFAULT_ARENA.cols;
+  @type("uint8") rows = DEFAULT_ARENA.rows;
+  /** O tema que veste a arena: só desenho, e o host escolhe. */
+  @type("string") themeId = DEFAULT_THEME.id;
+  /** Quanto dura a próxima rodada, em minutos; o host escolhe. */
+  @type("uint8") matchMinutes = DEFAULT_MATCH_MINUTES;
   @type([PlayerState]) players = new ArraySchema<PlayerState>();
-  @type(["uint8"]) grid = new ArraySchema<number>(...new Array(COLS * ROWS).fill(0));
+  @type(["uint8"]) grid = new ArraySchema<number>();
   @type([BombState]) bombs = new ArraySchema<BombState>();
   @type([FlameState]) flames = new ArraySchema<FlameState>();
   @type([PowerupState]) powerups = new ArraySchema<PowerupState>();

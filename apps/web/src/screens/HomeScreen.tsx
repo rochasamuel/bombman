@@ -25,7 +25,7 @@ export function HomeScreen() {
         playerName: options.playerName,
         seatKey: options.seatKey,
       });
-      saveSetup({ roomName: options.roomName, maxPlayers: options.maxPlayers });
+      saveSetup({ ...setup, roomName: options.roomName, maxPlayers: options.maxPlayers });
       setPendingRoom(room);
       return room.roomId;
     },
@@ -53,6 +53,10 @@ export function HomeScreen() {
             playerName: playerName.trim(),
             maxPlayers,
             seatKey: newSeatKey(),
+            // A arena da última vez; a escolha mesmo é na sala, antes de começar.
+            arenaId: setup.arenaId,
+            minutes: setup.minutes,
+            themeId: setup.themeId,
           });
         }}
       >

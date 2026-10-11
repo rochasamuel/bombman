@@ -4,7 +4,17 @@
  * aqui: ele é do servidor.
  */
 
-import { DEFAULT_MAX_PLAYERS, MAX_PLAYERS, MIN_PLAYERS } from "@bomb/shared";
+import {
+  DEFAULT_ARENA,
+  DEFAULT_MATCH_MINUTES,
+  DEFAULT_MAX_PLAYERS,
+  DEFAULT_THEME,
+  MAX_PLAYERS,
+  MIN_PLAYERS,
+  arenaById,
+  isMatchMinutes,
+  themeById,
+} from "@bomb/shared";
 
 export type StoredSession = {
   reconnectionToken: string;
@@ -20,6 +30,12 @@ export type StoredSession = {
 export type StoredSetup = {
   roomName: string;
   maxPlayers: number;
+  /** A última arena escolhida: a próxima sala abre com ela. */
+  arenaId: string;
+  /** O último tempo de rodada escolhido, em minutos. */
+  minutes: number;
+  /** O último tema escolhido. */
+  themeId: string;
 };
 
 const sessionKey = (code: string) => `bomb:session:${code}`;
@@ -62,7 +78,13 @@ export function saveSetup(setup: StoredSetup) {
 }
 
 export function loadSetup(): StoredSetup {
-  const fallback: StoredSetup = { roomName: "Arena do jardim", maxPlayers: DEFAULT_MAX_PLAYERS };
+  const fallback: StoredSetup = {
+    roomName: "Arena do jardim",
+    maxPlayers: DEFAULT_MAX_PLAYERS,
+    arenaId: DEFAULT_ARENA.id,
+    minutes: DEFAULT_MATCH_MINUTES,
+    themeId: DEFAULT_THEME.id,
+  };
   let stored: Partial<StoredSetup>;
   try {
     stored = JSON.parse(localStorage.getItem(SETUP_KEY) ?? "") as Partial<StoredSetup>;
@@ -78,6 +100,9 @@ export function loadSetup(): StoredSetup {
         : fallback.roomName,
     maxPlayers:
       seats >= MIN_PLAYERS && seats <= MAX_PLAYERS ? Math.round(seats) : fallback.maxPlayers,
+    arenaId: arenaById(stored.arenaId)?.id ?? fallback.arenaId,
+    minutes: isMatchMinutes(stored.minutes) ? stored.minutes : fallback.minutes,
+    themeId: themeById(stored.themeId)?.id ?? fallback.themeId,
   };
 }
 

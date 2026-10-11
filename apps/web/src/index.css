@@ -66,7 +66,7 @@
   --felt-navy: #142339;
   --felt-charcoal: #1e1e22;
   --felt-walnut: #2a1b12;
-  --felt: var(--felt-green);
+  --felt: var(--felt-navy);
 
   /* --- métrica --- */
   --stroke: 2px;
@@ -115,7 +115,8 @@ body {
   font-weight: 700;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--gloss);
+  /* Claro: o texto pequeno tem de se ler sobre o pano escuro. */
+  color: var(--paper-sh);
 }
 
 .px-title {
@@ -216,7 +217,7 @@ body {
   font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--gloss);
+  color: var(--paper-sh);
   background: none;
   border: 0;
   padding: 4px;
@@ -465,6 +466,44 @@ body {
   font-weight: 700;
   color: var(--mark);
   text-shadow: 4px 4px 0 var(--rim);
+}
+
+/* ---- a escolha da arena -------------------------------------------------- */
+
+/* O tamanho: três abas, uma acesa. É o mesmo amarelo do botão principal. */
+.bomb-arena-tab {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--paper-sh);
+  background: var(--slab-sh);
+  border: var(--stroke) solid var(--rim);
+  padding: 6px 4px;
+  cursor: pointer;
+}
+.bomb-arena-tab:not(:disabled):hover {
+  color: var(--paper-hi);
+}
+.bomb-arena-tab[aria-checked="true"] {
+  color: var(--ink);
+  background: var(--mark);
+  box-shadow:
+    inset 2px 2px 0 var(--mark-hi),
+    inset -2px -2px 0 var(--mark-sh);
+}
+.bomb-arena-tab:disabled {
+  cursor: default;
+}
+
+/* O separador entre o tema e o tamanho: um sulco, a linha escura em cima e a clara embaixo. */
+.bomb-separator {
+  border: 0;
+  height: 0;
+  margin: 2px 0;
+  border-top: 2px solid var(--rim);
+  border-bottom: 2px solid var(--gloss);
 }
 
 /* ---- o direcional na tela ------------------------------------------------ */

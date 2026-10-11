@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Room } from "@colyseus/sdk";
 import type {
+  ArenaMessage,
+  ThemeMessage,
+  TimeMessage,
+  ArenaSize,
   ArenaState,
   Emote,
   EmoteEvent,
@@ -25,6 +29,12 @@ export type ConnectionStatus = "connecting" | "naming" | "connected" | "lost";
 
 export type RoomActions = {
   start: () => void;
+  /** O tamanho da arena (só o host). O servidor sorteia a planta a cada rodada e manda para todos. */
+  arena: (size: ArenaSize) => void;
+  /** O tempo da próxima rodada, em minutos (só o host). */
+  time: (minutes: number) => void;
+  /** O tema da arena (só o host). O servidor confere e espelha para todos. */
+  theme: (themeId: string) => void;
   /** A direção do dedo. Zero nos dois é parado. */
   input: (dx: number, dy: number) => void;
   bomb: () => void;
@@ -94,6 +104,9 @@ export function useRoomConnection(code: string): RoomConnection {
         const next = [
           snapshot.phase,
           snapshot.hostId,
+          snapshot.arenaId,
+          snapshot.themeId,
+          snapshot.matchMinutes,
           snapshot.countdown,
           snapshot.winnerId,
           snapshot.round,
@@ -240,6 +253,9 @@ export function useRoomConnection(code: string): RoomConnection {
   const actions = useMemo<RoomActions>(
     () => ({
       start: () => roomRef.current?.send("start"),
+      arena: (size) => roomRef.current?.send("arena", { size } satisfies ArenaMessage),
+      time: (minutes) => roomRef.current?.send("time", { minutes } satisfies TimeMessage),
+      theme: (themeId) => roomRef.current?.send("theme", { themeId } satisfies ThemeMessage),
       input: (dx, dy) => {
         // Só o que mudou: o teclado repete a tecla segurada dezenas de vezes
         // por segundo, e o servidor guarda a direção até a próxima.
