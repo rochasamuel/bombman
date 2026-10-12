@@ -24,7 +24,7 @@ ou uma bomba só; toda maldição pega: quem encosta num amaldiçoado leva a
 mesma, pelos quinze segundos inteiros), 🔄 a troca (você troca de lugar na
 hora com um adversário sorteado), 👻 a invisibilidade (dez segundos em que
 os outros só te veem num lampejo) e 📡 o controle remoto (as suas bombas
-ganham antena e esperam: **C** ou **Shift** — no celular, o botão 📡 — detona
+ganham antena e esperam: **B** ou **Shift** — no celular, o botão 📡 — detona
 a mais antiga, que pisca 300 ms em todas as telas e só então explode; o aviso
 cobre o ping de quase todo mundo, e ninguém morre de uma bomba que não viu
 piscar. Esquecida, ela explode sozinha em 10 s; morrer leva o controle, e as

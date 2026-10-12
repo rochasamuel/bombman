@@ -236,7 +236,7 @@ export function Arena({ state, live, local, setDiag, sessionId, actions, onFx, o
             <TouchPad controls={controls} remote={!!me?.remote} />
           ) : (
             <p className="px-label text-center md:text-right">
-              setas ou WASD andam · espaço solta a bomba{me?.remote && " · C detona"}
+              setas ou WASD andam · espaço solta a bomba{me?.remote && " · B detona"}
             </p>
           )}
           <EmotePicker onSend={actions.emote} />

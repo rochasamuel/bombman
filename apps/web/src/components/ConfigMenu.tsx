@@ -64,7 +64,7 @@ export function ConfigMenu() {
         />
         <div className="flex flex-col gap-1 text-xs" style={{ color: "var(--paper-sh)" }}>
           <span className="px-label">Teclado</span>
-          <span>setas ou WASD andam · espaço, X ou Z soltam a bomba · C ou Shift detonam a remota</span>
+          <span>setas ou WASD andam · espaço, X ou Z soltam a bomba · B ou Shift detonam a remota</span>
         </div>
       </div>
     </details>

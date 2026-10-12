@@ -24,7 +24,7 @@ const KEYS: Record<string, Dir> = {
 
 const BOMB_KEYS = new Set(["Space", "Enter", "KeyX", "KeyZ", "KeyJ", "KeyK"]);
 /** O controle remoto: detona a remota mais antiga. */
-const DETONATE_KEYS = new Set(["KeyC", "KeyL", "ShiftLeft", "ShiftRight"]);
+const DETONATE_KEYS = new Set(["KeyB", "ShiftLeft", "ShiftRight"]);
 
 const VECTOR: Record<Dir, [number, number]> = {
   up: [0, -1],
