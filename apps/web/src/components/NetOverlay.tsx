@@ -1,24 +1,19 @@
 import { useEffect, useState } from "react";
 import { TICK_HZ } from "@bomb/shared";
 import type { LocalPlayer } from "../game/local";
-import { browserConfig } from "../game/netconfig";
+import { useUi } from "../store/ui";
 
 /*
- * O diagnóstico de rede, no canto da tela. Fechado por padrão; a tecla à
- * esquerda do 1 (' no ABNT, ` no americano — `Backquote`, pela posição) abre e
- * fecha (e a escolha fica guardada), `?net=1` abre ao carregar. Aberto, ele
+ * O diagnóstico de rede, no canto da tela. Fechado por padrão; abre e fecha
+ * pelos ajustes ou pela tecla à esquerda do 1 (' no ABNT, ` no americano —
+ * `Backquote`, pela posição), e a escolha fica guardada; `?net=1` abre ao
+ * carregar. Aberto, ele
  * liga o ping nativo do Colyseus e pede as estatísticas do relógio da sala.
  * Lê contadores quatro vezes por segundo: não custa nada ao desenho.
  */
 
-const STORAGE = "bomb.net.net";
-
-function initiallyOpen() {
-  return browserConfig().diag;
-}
-
 export function NetOverlay({ local, setDiag }: { local: LocalPlayer; setDiag?: (on: boolean) => void }) {
-  const [open, setOpen] = useState(initiallyOpen);
+  const open = useUi((ui) => ui.netDiag);
   const [now, setNow] = useState(0);
 
   useEffect(() => {
@@ -27,14 +22,8 @@ export function NetOverlay({ local, setDiag }: { local: LocalPlayer; setDiag?: (
       if (event.code !== "Backquote" || event.repeat || event.ctrlKey || event.altKey || event.metaKey) return;
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
       event.preventDefault();
-      setOpen((was) => {
-        try {
-          localStorage.setItem(STORAGE, was ? "0" : "1");
-        } catch {
-          // sem localStorage: só nesta aba
-        }
-        return !was;
-      });
+      const ui = useUi.getState();
+      ui.setNetDiag(!ui.netDiag);
     };
     addEventListener("keydown", key);
     return () => removeEventListener("keydown", key);

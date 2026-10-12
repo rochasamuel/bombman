@@ -323,7 +323,7 @@ Tela (no build, `VITE_*`; ou na URL, `?interp=80`, ou em
 
 ### Diagnóstico
 
-A tecla **à esquerda do 1** (`'` no teclado ABNT, `` ` `` no americano) abre e fecha, na arena, o painel de rede (fechado por padrão, também em
+O interruptor **Painel de rede**, nos ajustes da arena, abre e fecha o painel de rede (atalho: a tecla à esquerda do 1, `'` no ABNT, `` ` `` no americano) (fechado por padrão, também em
 produção; a escolha fica guardada). Ele mostra RTT e variação (ping nativo),
 jitter e idade do estado, o atraso de interpolação em uso, comandos pendentes,
 tempo de confirmação, reconciliações, correções (contagem, média, máxima),

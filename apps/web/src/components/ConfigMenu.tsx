@@ -13,6 +13,8 @@ export function ConfigMenu() {
   const setLowMotion = useUi((ui) => ui.setLowMotion);
   const touchPad = useUi((ui) => ui.touchPad);
   const setTouchPad = useUi((ui) => ui.setTouchPad);
+  const netDiag = useUi((ui) => ui.netDiag);
+  const setNetDiag = useUi((ui) => ui.setNetDiag);
 
   return (
     <details className="px-menu relative" name="bomb-header">
@@ -52,6 +54,13 @@ export function ConfigMenu() {
           label="Movimento reduzido"
           state={["ligado", "desligado"]}
           hint="Nada pisca fora da arena. O sistema pode ligar isto sozinho."
+        />
+        <Switch
+          on={netDiag}
+          onToggle={() => setNetDiag(!netDiag)}
+          label="Painel de rede"
+          state={["aberto", "fechado"]}
+          hint="Ping, atraso e correções, no canto da arena."
         />
         <div className="flex flex-col gap-1 text-xs" style={{ color: "var(--paper-sh)" }}>
           <span className="px-label">Teclado</span>
