@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Room } from "@colyseus/sdk";
 import type {
   ArenaMessage,
-  BombMessage,
+  DiagMessage,
+  NetStatsMessage,
   ThemeMessage,
   TimeMessage,
   ArenaSize,
@@ -13,9 +14,10 @@ import type {
   ErrorMessage,
   FxEvent,
   FxMessage,
-  InputMessage,
   JoinRoomOptions,
 } from "@bomb/shared";
+import { LocalPlayer } from "./local";
+import { browserConfig } from "./netconfig";
 import { client } from "../lib/colyseus";
 import { takePendingRoom } from "../lib/pendingRoom";
 import {
@@ -36,10 +38,10 @@ export type RoomActions = {
   time: (minutes: number) => void;
   /** O tema da arena (só o host). O servidor confere e espelha para todos. */
   theme: (themeId: string) => void;
-  /** A direção do dedo. Zero nos dois é parado. */
+  /** A direção do dedo. Zero nos dois é parado. Só registra: quem anda e manda é o passo fixo (`LocalPlayer`). */
   input: (dx: number, dy: number) => void;
-  /** Uma bomba, na célula em que a tela a mostrou (se mostrou). */
-  bomb: (at?: { cx: number; cy: number } | null) => void;
+  /** Uma bomba, no próximo passo fixo. */
+  bomb: () => void;
   emote: (emote: Emote) => void;
   restart: () => void;
 };
@@ -56,6 +58,10 @@ export type RoomConnection = {
    * por render nenhum.
    */
   live: () => ArenaState | null;
+  /** O próprio boneco: previsão, envio dos comandos e o relógio da interpolação. Ausente no `/mock`. */
+  local?: LocalPlayer;
+  /** Liga ou desliga o diagnóstico de rede (o ping e as estatísticas do servidor). */
+  setDiag?: (on: boolean) => void;
   sessionId: string;
   join: (playerName: string) => Promise<void>;
   retry: () => void;
@@ -77,6 +83,8 @@ export function useRoomConnection(code: string): RoomConnection {
   const [notice, setNotice] = useState("");
   const [state, setState] = useState<ArenaState | null>(null);
   const [sessionId, setSessionId] = useState("");
+  const [local] = useState(() => new LocalPlayer(browserConfig()));
+  const diagOn = useRef(false);
 
   const attach = useCallback(
     (room: Room, playerName: string, seatKey: string) => {
@@ -97,7 +105,20 @@ export function useRoomConnection(code: string): RoomConnection {
        * direto do `live()`. Daí a assinatura: só o que o React desenha.
        */
       let signature = "";
+      local.connect(
+        (batch) => {
+          try {
+            room.send("input", batch);
+          } catch {
+            // socket morto: o comando se perde, e a reconciliação acerta o boneco quando voltar
+          }
+        },
+        () => room.sessionId,
+      );
+      if (diagOn.current) room.send("diag", { on: true } satisfies DiagMessage);
       room.onStateChange(() => {
+        // Todo patch: a previsão se acerta com o servidor e o relógio anota a chegada.
+        local.onState(room.state as unknown as ArenaState, performance.now());
         if (room.reconnectionToken !== token) {
           token = room.reconnectionToken;
           saveSession(code, { reconnectionToken: token, playerName, seatKey });
@@ -131,19 +152,44 @@ export function useRoomConnection(code: string): RoomConnection {
       room.onMessage("emote", (event: EmoteEvent) => {
         for (const handler of emoteHandlers.current) handler(event);
       });
-      room.onDrop(() => setDropped(true));
+      room.onMessage("net", (stats: NetStatsMessage) => {
+        local.setServerStats(stats);
+      });
+      room.onDrop(() => {
+        local.setOnline(false);
+        setDropped(true);
+      });
       room.onReconnect(() => {
+        local.setOnline(true);
         setDropped(false);
         token = room.reconnectionToken;
         saveSession(code, { reconnectionToken: token, playerName, seatKey });
       });
       room.onLeave(() => {
+        local.setOnline(false);
         roomRef.current = null;
         setStatus("lost");
       });
     },
-    [code],
+    [code, local],
   );
+
+  /* O ping nativo do Colyseus, uma vez por segundo, só com o diagnóstico aberto. */
+  const [diag, setDiagState] = useState(false);
+  useEffect(() => {
+    if (!diag) return;
+    const timer = setInterval(() => roomRef.current?.ping((ms) => local.measurePing(ms)), 1000);
+    return () => clearInterval(timer);
+  }, [diag, local]);
+  const setDiag = useCallback((on: boolean) => {
+    diagOn.current = on;
+    setDiagState(on);
+    try {
+      roomRef.current?.send("diag", { on } satisfies DiagMessage);
+    } catch {
+      // sem conexão: vai de novo no `attach`
+    }
+  }, []);
 
   const join = useCallback(
     async (playerName: string) => {
@@ -250,27 +296,18 @@ export function useRoomConnection(code: string): RoomConnection {
     clearSession(code);
   }, [code]);
 
-  /** A última direção mandada, para não repetir a mesma. */
-  const lastInput = useRef("");
   const actions = useMemo<RoomActions>(
     () => ({
       start: () => roomRef.current?.send("start"),
       arena: (size) => roomRef.current?.send("arena", { size } satisfies ArenaMessage),
       time: (minutes) => roomRef.current?.send("time", { minutes } satisfies TimeMessage),
       theme: (themeId) => roomRef.current?.send("theme", { themeId } satisfies ThemeMessage),
-      input: (dx, dy) => {
-        // Só o que mudou: o teclado repete a tecla segurada dezenas de vezes
-        // por segundo, e o servidor guarda a direção até a próxima.
-        const key = `${dx},${dy}`;
-        if (key === lastInput.current) return;
-        lastInput.current = key;
-        roomRef.current?.send("input", { dx, dy } satisfies InputMessage);
-      },
-      bomb: (at) => roomRef.current?.send("bomb", (at ?? {}) satisfies BombMessage),
+      input: (dx, dy) => local.setDirection(dx, dy),
+      bomb: () => local.requestBomb(),
       emote: (emote) => roomRef.current?.send("emote", { emote } satisfies EmoteMessage),
       restart: () => roomRef.current?.send("restart"),
     }),
-    [],
+    [local],
   );
 
   const live = useCallback(
@@ -297,6 +334,8 @@ export function useRoomConnection(code: string): RoomConnection {
     notice,
     state,
     live,
+    local,
+    setDiag,
     sessionId,
     join,
     retry,

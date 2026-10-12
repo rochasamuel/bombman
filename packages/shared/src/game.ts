@@ -47,6 +47,7 @@ import {
 } from "./contract.js";
 import { ARENA_SIZE_NAME, fillGrid, type ArenaDefinition } from "./arena.js";
 import { moveOnRails, moveSpeed } from "./move.js";
+import { DEFAULT_INPUT_LIMITS, InputQueue, TICK_MS, cellBlocked, type InputQueueLimits, type MoveCommand } from "./net.js";
 import { DEFAULT_ARENA } from "./arenas.js";
 
 /**
@@ -96,6 +97,15 @@ export type GamePlayer = {
   curseUntil: number;
   wins: number;
   input: { dx: number; dy: number };
+  /**
+   * Os comandos numerados que a tela manda (ver `net.ts`). Um jogador que
+   * já mandou um comando anda só por eles, um por passo; `input` fica para o
+   * `/mock` e os testes, que seguram a direção.
+   */
+  queue: InputQueue;
+  driven: boolean;
+  /** Até quando conta como andando: um passo sem comando (a rede atrasou) não vira um quadro parado. */
+  movingUntil: number;
   /** Um pedido de bomba, consumido no tick seguinte. */
   wantsBomb: boolean;
   /** A célula em que a tela de quem joga desenhou a bomba (ver `requestBomb`). */
@@ -125,6 +135,9 @@ export type Bomb = {
 export type Flame = { cx: number; cy: number; kind: number; born: number; until: number };
 export type PowerupDrop = { cx: number; cy: number; kind: Powerup };
 
+/** Quanto tempo depois do último comando de andar o boneco ainda aparece andando, em ms. */
+const MOVING_HOLD_MS = 4 * TICK_MS;
+
 /** Chance de um bloco destruído deixar um item. */
 const DROP_CHANCE = 0.38;
 /** Os pesos dos itens, na ordem de `POWERUPS`: fogo, bomba, bota, chute, perfurante, caveira. O chute e a perfurante são raros: juntos, menos de um item em dez. */
@@ -143,6 +156,11 @@ const MAX_STEP_MS = 50;
  */
 export function touches(player: { x: number; y: number }, cx: number, cy: number): boolean {
   return Math.abs(player.x - (cx + 0.5)) < 1 - 1e-6 && Math.abs(player.y - (cy + 0.5)) < 1 - 1e-6;
+}
+
+/** Quanto um comando anda: um passo fixo na velocidade do jogador. A previsão da tela usa a mesma conta. */
+export function commandDistance(player: { speed: number; curse: Curse | "" }): number {
+  return (moveSpeed(player.speed, player.curse) * TICK_MS) / 1000;
 }
 
 export class BombGame {
@@ -176,6 +194,7 @@ export class BombGame {
   constructor(
     private random: () => number = Math.random,
     arena: ArenaDefinition = DEFAULT_ARENA,
+    private inputLimits: InputQueueLimits = DEFAULT_INPUT_LIMITS,
   ) {
     this.arena = arena;
     this.buildGrid();
@@ -268,6 +287,9 @@ export class BombGame {
       curseUntil: 0,
       wins: 0,
       input: { dx: 0, dy: 0 },
+      queue: new InputQueue(this.inputLimits),
+      driven: false,
+      movingUntil: 0,
       wantsBomb: false,
     };
     this.players.push(player);
@@ -295,6 +317,8 @@ export class BombGame {
     }
     if (this.winnerId === player.id) this.winnerId = id;
     player.id = id;
+    // A conexão nova é outra tela: a numeração dos comandos recomeça.
+    player.queue.reset();
   }
 
   /* --------------------------------------------------------------- rodada */
@@ -330,8 +354,10 @@ export class BombGame {
         curse: "",
         curseUntil: 0,
         input: { dx: 0, dy: 0 },
+        movingUntil: 0,
         wantsBomb: false,
       });
+      player.queue.discard();
     }
     this.phase = "countdown";
     this.countdownUntil = this.time + COUNTDOWN;
@@ -355,6 +381,26 @@ export class BombGame {
     if (!player) return;
     player.input.dx = Math.sign(Number(dx) || 0);
     player.input.dy = Math.sign(Number(dy) || 0);
+  }
+
+  /**
+   * Comandos numerados de quem joga pela rede (já conferidos por
+   * `decodeBatch`). Daqui em diante o jogador anda só por eles.
+   */
+  pushCommands(id: string, commands: readonly MoveCommand[]): number {
+    const player = this.players.find((p) => p.id === id);
+    if (!player) return 0;
+    player.driven = true;
+    return player.queue.push(commands);
+  }
+
+  /** Esquece os comandos na fila (quem caiu da rede): o boneco não segue andando sozinho. */
+  dropCommands(id: string) {
+    const player = this.players.find((p) => p.id === id);
+    if (!player) return;
+    player.queue.discard();
+    player.input.dx = 0;
+    player.input.dy = 0;
   }
 
   /**
@@ -394,8 +440,11 @@ export class BombGame {
   private step(dt: number) {
     this.time += dt;
     if (this.phase === "countdown") {
-      // Apertar bomba no "3, 2, 1" não guarda uma bomba para o "valendo".
-      for (const player of this.players) player.wantsBomb = false;
+      // Apertar bomba no "3, 2, 1" não guarda uma bomba para o "valendo"; andar, idem.
+      for (const player of this.players) {
+        player.wantsBomb = false;
+        player.queue.discard();
+      }
       if (this.time >= this.countdownUntil) {
         this.phase = "playing";
         this.fx.push({ k: "start" });
@@ -403,13 +452,16 @@ export class BombGame {
       }
       return;
     }
-    if (this.phase !== "playing") return;
+    if (this.phase !== "playing") {
+      for (const player of this.players) player.queue.discard();
+      return;
+    }
 
     this.timeLeft = Math.max(0, this.timeLeft - dt);
     const seconds = dt / 1000;
 
     for (const player of this.players) {
-      this.tickPlayer(player, seconds);
+      this.tickPlayer(player, seconds, dt);
     }
     this.tickBombs(seconds);
     this.tickFlames();
@@ -417,13 +469,15 @@ export class BombGame {
     this.checkEnd();
   }
 
-  private tickPlayer(player: GamePlayer, seconds: number) {
+  private tickPlayer(player: GamePlayer, seconds: number, dt: number) {
     if (player.curse && this.time >= player.curseUntil) player.curse = "";
 
     if (!player.alive) {
       // Um pedido de bomba feito morto não vale ao renascer: a tecla apertada
-      // no susto poria uma bomba no canto no exato instante da volta.
+      // no susto poria uma bomba no canto no exato instante da volta. Os
+      // comandos de andar, idem: são confirmados e jogados fora.
       player.wantsBomb = false;
+      player.queue.discard();
       if (player.respawnAt && this.time >= player.respawnAt) this.respawn(player);
       return;
     }
@@ -435,11 +489,34 @@ export class BombGame {
       player.bombAt = null;
     }
 
+    if (player.driven) {
+      this.drive(player, dt);
+      return;
+    }
+
     const { dx, dy } = player.input;
     player.moving = dx !== 0 || dy !== 0;
     if (!player.moving) return;
+    this.movePlayer(player, dx, dy, moveSpeed(player.speed, player.curse) * seconds);
+  }
 
-    const dist = moveSpeed(player.speed, player.curse) * seconds;
+  /**
+   * Os comandos deste passo, cada um uma vez, em ordem: a bomba primeiro (na
+   * célula em que o boneco está naquele comando), depois o passo de
+   * `TICK_MS`. É a mesma conta que a tela faz na previsão.
+   */
+  private drive(player: GamePlayer, dt: number) {
+    for (const cmd of player.queue.take(dt / TICK_MS)) {
+      if (!player.alive) break;
+      if (cmd.bomb) this.placeBomb(player);
+      if (cmd.dx === 0 && cmd.dy === 0) continue;
+      player.movingUntil = this.time + MOVING_HOLD_MS;
+      this.movePlayer(player, cmd.dx, cmd.dy, commandDistance(player));
+    }
+    player.moving = this.time < player.movingUntil;
+  }
+
+  private movePlayer(player: GamePlayer, dx: number, dy: number, dist: number) {
     const { bumped } = moveOnRails(player, dx, dy, dist, (cx, cy) => this.blockedFor(player, cx, cy));
     // Esbarrou numa bomba com a bota de chute: ela vai.
     if (bumped && player.kick) {
@@ -453,10 +530,13 @@ export class BombGame {
 
   /** A célula está fechada para ESTE jogador. A bomba em que ele ainda está em cima não fecha. */
   private blockedFor(player: GamePlayer, cx: number, cy: number): boolean {
-    if (cx < 0 || cy < 0 || cx >= this.cols || cy >= this.rows) return true;
-    if (this.grid[this.index(cx, cy)] !== FLOOR) return true;
-    const bomb = this.bombAt(cx, cy);
-    return !!bomb && !bomb.passers.has(player.id);
+    return cellBlocked(
+      this,
+      cx,
+      cy,
+      (bx, by) => !!this.bombAt(bx, by),
+      (bx, by) => !!this.bombAt(bx, by)?.passers.has(player.id),
+    );
   }
 
   bombAt(cx: number, cy: number) {
@@ -690,6 +770,8 @@ export class BombGame {
   private kill(player: GamePlayer) {
     player.alive = false;
     player.moving = false;
+    player.movingUntil = 0;
+    player.queue.discard();
     player.lives -= 1;
     player.curse = "";
     // A morte leva o chute e a perfurante; fogo, bombas e bota ficam.
@@ -753,7 +835,9 @@ export class BombGame {
     for (const player of this.players) {
       player.input = { dx: 0, dy: 0 };
       player.moving = false;
+      player.movingUntil = 0;
       player.wantsBomb = false;
+      player.queue.discard();
     }
     this.fx.push({ k: "finish", winner: this.winnerId });
     this.say(

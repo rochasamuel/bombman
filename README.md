@@ -1,8 +1,10 @@
 # Bombman
 
 Bomberman multiplayer para até 4 pessoas, em pixel art. O servidor é
-autoritativo: o cliente só manda a direção do dedo e desenha o estado que
-recebe de volta, sessenta vezes por segundo.
+autoritativo: o cliente manda comandos numerados (a direção do dedo, passo a
+passo) e prevê o próprio boneco com a mesma regra do servidor, que confirma ou
+corrige; os outros são desenhados a partir do estado que volta (ver
+[A rede](#a-rede)).
 
 **As regras são as do original.** Cada um nasce num canto com 3 vidas, 1 bomba
 e fogo de alcance 1. Antes de começar, o host escolhe o tempo da rodada (3, 5, 7 ou 10
@@ -57,10 +59,10 @@ vice-versa — com o corte de quina dos Bomberman clássicos: apertar para cima
 perto de uma esquina desliza o personagem até o corredor em vez de travá-lo na
 parede.
 
-A sala roda o motor a 60 Hz (`setSimulationInterval`) e manda patches a 20 Hz.
-O cliente interpola a posição entre um patch e outro (`game/render.ts`), e o
-que não é situação — o som de uma explosão, um emoji — vai em mensagens `fx` e
-`emote`, fora do estado sincronizado.
+A sala roda o motor em passos fixos de 60 Hz e manda patches a ~30 Hz; o
+próprio boneco é previsto na tela e os outros são interpolados (ver
+[A rede](#a-rede)). O que não é situação — o som de uma explosão, um emoji —
+vai em mensagens `fx` e `emote`, fora do estado sincronizado.
 
 ### A arte
 
@@ -218,6 +220,207 @@ verdade, para olhar cada planta sem servidor; a escolhida vai para a URL
 (`/mock?arena=small&theme=volcano`; uma planta na URL, `?arena=small-maze`,
 joga só ela, para olhar de perto), e "sair" volta para a escolha.
 
+## A rede
+
+Os jogadores estão quase todos no Brasil e o servidor, nos EUA: 120–200 ms de
+ida e volta. A rede foi desenhada para que isso não apareça no próprio boneco
+nem em tranco nos outros.
+
+### O que causava o "anda e volta"
+
+A versão anterior previa o boneco, mas sem número de comando:
+
+1. A entrada era um **estado** ("direita apertada"), e o servidor andava de
+   quando o "apertou" chegava até quando o "soltou" chegava. A variação da
+   rede mudava essa duração, e cada parada terminava numa correção para trás.
+2. A reconciliação comparava o servidor com onde a tela tinha o boneco "uma ida
+   e volta atrás" — um palpite de tempo. Com a variação do RTT e a fase do
+   patch (0–33 ms, 0,1–0,2 célula), havia uma "diferença" quase a cada patch.
+3. A tela andava em passos do quadro e o servidor em fatias de até 50 ms; o
+   andar em trilhos (deslize para o corredor, corte de quina, encosto na
+   parede) depende do caminho, então o mesmo tempo dava posições diferentes.
+4. A posição ia arredondada em 0,01 célula: a tela nunca batia exatamente.
+
+### Como funciona agora
+
+```
+tela                                         servidor (autoritativo)
+────                                         ───────────────────────
+teclado/toque ─► direção segurada
+passo fixo 60 Hz (relógio da tela, não do quadro)
+  └─ comando {seq, dx, dy, bomba} ─► lote ─────► fila do jogador (InputQueue)
+  └─ previsão: aplica já (moveOnRails)            passo fixo 60 Hz: 1 comando/passo
+     guarda o resultado de cada seq                (crédito: no máx. +1 para alcançar)
+                                                  bomba no comando: célula daquele passo
+estado (patch ~30 Hz) ◄────────── x, y float64, seq = último aplicado, tick
+  └─ descarta seq ≤ confirmado
+  └─ volta à posição do servidor, reaplica o resto em ordem
+  └─ diferença → offset do desenho (meia-vida 60 ms); > 1,5 célula: pula e conta
+outros bonecos: amostras carimbadas pelo tick do servidor,
+  desenhados em agora − menor atraso − atraso adaptativo (≥ 50 ms)
+```
+
+- **Passo fixo e regra única.** `TICK_MS` (60 Hz) é parte do protocolo
+  (`packages/shared/src/net.ts`). O motor anda por `commandDistance` a cada
+  comando, a tela também, e as duas perguntam "esta célula fecha?" pela mesma
+  função (`cellBlocked`). A mesma sequência de comandos dá o mesmo resultado,
+  bit a bit (há teste).
+- **Comandos, não estados.** Parado não gera comando. Os comandos vão em lotes
+  `{seq, runs: [[código, quantos]]}` a cada dois passos, ou na hora em que a
+  direção muda ou sai uma bomba (~30 mensagens/s andando, nenhuma parado).
+- **O servidor confere tudo** (`decodeBatch`): inteiro, faixa, tamanho,
+  bomba sempre isolada; lote fora do formato cai inteiro e é contado. Repetido
+  (`seq` já visto) cai. Cada passo do motor dá um crédito e cada comando gasta
+  um — o boneco nunca anda mais do que o relógio permite (no máximo
+  `INPUT_CREDIT_MAX` passos à frente), por mais comandos que cheguem. A fila
+  tem teto (`INPUT_QUEUE_MAX`), e morto, fora da rodada ou desconectado, os
+  comandos são confirmados e jogados fora.
+- **Bomba no comando.** A bomba é posta na célula em que o boneco está naquele
+  comando — a mesma que a tela mostrou. A tela mostra uma bomba provisória e
+  toca o som na hora, só se o servidor deve aceitar; ela é trocada pela de
+  verdade (o pavio continua) ou some, quando o comando é confirmado.
+  Reaplicar comandos nunca cria bomba nem som. Detonação, chama, dano, morte e
+  fim de rodada são só do servidor.
+- **Os outros** são interpolados na linha do tempo do servidor (`state.tick`
+  muda só quando alguma posição muda), não na hora de chegada: um patch
+  atrasado não acelera nem freia ninguém. O atraso se ajusta à variação medida
+  (`intervalo + 2 × jitter`, entre 50 e 200 ms).
+- **O relógio da sala** (`ArenaRoom.advance`) transforma o tempo real em
+  passos fixos e, depois de um engasgo, recupera no máximo
+  `MAX_CATCHUP_TICKS`; o resto é jogado fora e contado. O patch sai no seu
+  próprio intervalo (`PATCH_MS`), independente do passo.
+
+O Colyseus 0.17 instalado não tem previsão nem reconciliação próprias; usa-se
+o que ele tem: `setSimulationInterval`, `patchRate`, `maxMessagesPerSecond`,
+o `room.ping()` do SDK e o estado `Schema` (só com o que muda; idle não manda
+nada).
+
+### Configuração
+
+Servidor (variáveis de ambiente; fora da faixa, vale o padrão com aviso no log):
+
+| variável | padrão | faixa | o quê |
+|---|---|---|---|
+| `PATCH_MS` | 33 | 16–200 | de quanto em quanto o estado sai |
+| `MAX_CATCHUP_TICKS` | 6 | 1–60 | passos recuperados de uma vez depois de um engasgo |
+| `INPUT_QUEUE_MAX` | 60 | 8–600 | comandos guardados por jogador |
+| `INPUT_CREDIT_MAX` | 8 | 1–60 | passos que um jogador pode alcançar depois de um atraso |
+| `MAX_MESSAGES_PER_SECOND` | 120 | 30–10000 | acima disso a conexão cai |
+| `NET_LOG_SECONDS` | 0 | 0–3600 | log JSON do relógio da sala a cada N s (0 desliga) |
+| `STALL_WARN_MS` | 100 | 20–10000 | passo mais lento que isso vira aviso (1 a cada 10 s por sala) |
+
+Tela (no build, `VITE_*`; ou na URL, `?interp=80`, ou em
+`localStorage["bomb.net.interp"]`, para testar sem build novo):
+
+| URL | build | padrão | o quê |
+|---|---|---|---|
+| `interp` | `VITE_INTERP_MS` | 0 (adaptativo) | atraso fixo da interpolação dos outros, ms |
+| `interpMin` / `interpMax` | `VITE_INTERP_MIN_MS` / `VITE_INTERP_MAX_MS` | 50 / 200 | limites do atraso adaptativo |
+| `correct` | `VITE_CORRECTION_MS` | 60 | meia-vida da correção visual do próprio boneco |
+| `pending` | `VITE_MAX_PENDING` | 120 | comandos não confirmados guardados (2 s) |
+| `catchup` | `VITE_MAX_CATCHUP` | 8 | passos que um quadro lento pode rodar |
+| `net` | `VITE_NET_DIAG` | 0 | `1` abre o diagnóstico ao carregar |
+
+### Diagnóstico
+
+**F3** na arena abre e fecha o painel de rede (fechado por padrão, também em
+produção; a escolha fica guardada). Ele mostra RTT e variação (ping nativo),
+jitter e idade do estado, o atraso de interpolação em uso, comandos pendentes,
+tempo de confirmação, reconciliações, correções (contagem, média, máxima),
+previsões erradas e correções grandes, quadros por segundo, e — pedido ao
+servidor só enquanto aberto — passos por segundo, custo do passo, atraso do
+relógio, tempo perdido em engasgo e a fila de entrada desta tela no servidor.
+
+No servidor, `NET_LOG_SECONDS=60` escreve uma linha JSON por sala por minuto
+(`msg: "room net"`); engasgos acima de `STALL_WARN_MS` viram `msg: "room
+stall"`. Nada é logado por comando.
+
+### Simulação de rede
+
+`apps/web/scripts/netsim.ts` sobe o build do servidor num processo à parte e
+põe robôs para jogar com o SDK de verdade e com a mesma previsão, relógio e
+interpolação da tela. A rede é moldada no próprio processo: cada mensagem, nos
+dois sentidos, espera meia ida e volta mais uma variação, em ordem (TCP); de
+vez em quando uma fica presa (perda + retransmissão). O engasgo do servidor é
+um `SIGSTOP`/`SIGCONT` no processo dele.
+
+```bash
+pnpm --filter server build
+apps/server/node_modules/.bin/tsx apps/web/scripts/netsim.ts                 # todos os cenários, 20 s cada
+apps/server/node_modules/.bin/tsx apps/web/scripts/netsim.ts rtt150 rtt200 --seconds=30 --json=out.json
+apps/server/node_modules/.bin/tsx apps/web/scripts/netsim.ts rtt150-jitter60 --no-bombs   # mundo parado: toda correção seria erro
+```
+
+Uma rodada em 11/10/2026 (WSL2, 4 robôs por sala, 20 s por cenário, bombas a
+cada 2–5 s, direção nova a cada 0,3–1,2 s):
+
+| cenário | correções/robô/min | correção máx (células) | grandes | confirmação | bombas cmd/eventos, duplicadas | saltos visíveis dos outros | ↓ KB/s | passo do servidor (méd/máx) |
+|---|---|---|---|---|---|---|---|---|
+| 50 ms ±5 | 0 | 0 | 0 | 88 ms | 19/16, 0 | 0 / 2308 quadros | 1,56 | 0,15 / 0,64 ms |
+| 100 ms ±10 | 0 | 0 | 0 | 142 ms | 18/15, 0 | 0 / 2344 | 1,50 | 0,13 / 0,45 ms |
+| 150 ms ±20 | 0 | 0 | 0 | 204 ms | 19/17, 0 | 0 / 2273 | 1,55 | 0,13 / 0,55 ms |
+| 200 ms ±30 | 1,5 | 0,29 | 0 | 264 ms | 20/18, 0 | 0 / 2376 | 1,69 | 0,17 / 1,45 ms |
+| 150 ms, patch 50 ms | 0,8 | 0,02 | 0 | 206 ms | 19/16, 0 | 0 / 2415 | 1,21 | 0,14 / 0,52 ms |
+| 150 ms ±60 | 0,8 | 0,02 | 0 | 249 ms | 18/15, 0 | 0 / 2302 | 1,46 | 0,17 / 0,52 ms |
+| 150 ms, 2% presas +250 ms | 0,8 | 0,22 | 0 | 331 ms | 18/15, 0 | 2 / 2212 | 1,47 | 0,14 / 0,58 ms |
+| 150 ms, servidor para 300 ms a cada 4 s | 0 | 0 | 0 | 287 ms | 20/17, 0 | 4 / 2383 | 1,54 | 0,14 / 0,45 ms (817 ms perdidos) |
+| 150 ms, 8 salas (32 robôs) | 0,2 | 0,13 | 0 | 204 ms | 166/138, 0 | 0 / 20479 | 1,63 | 0,12 / 0,54 ms |
+
+As correções que sobram vêm de o mundo mudar entre a previsão e o servidor
+(a bomba de outro jogador que a tela ainda não via, um tijolo que caiu, um
+item de velocidade) — com `--no-bombs` elas vão a zero mesmo com ±60 ms e
+picos de 250 ms. Bombas: menos eventos que comandos porque o servidor recusa
+a bomba sem bomba na mão; nenhum robô teve mais eventos que comandos. Patch a
+50 ms gasta 22% menos banda que a 33 ms, com o atraso dos outros ~5 ms maior;
+a banda é pequena dos dois jeitos, e o padrão ficou 33 ms. Os "saltos" dos
+outros só aparecem com o servidor parado ou mensagens presas por 250 ms —
+mais que o atraso de interpolação.
+
+### Implantação
+
+O protocolo mudou nos dois lados (o lote de comandos, `seq`/`tick`/`passers`
+no estado): **servidor e tela sobem juntos**. Uma tela antiga contra o
+servidor novo manda `{dx, dy}`, que é recusado (o boneco não anda); recarregar
+resolve.
+
+```bash
+pnpm build
+pnpm --filter server start      # PATCH_MS, NET_LOG_SECONDS… no ambiente, se quiser mudar
+```
+
+### Medir antes e depois, e EUA × São Paulo
+
+Mudar o servidor de região tira RTT, mas não conserta previsão: com esta
+rede, a tela já anda na hora em qualquer RTT, e o que a região muda é o quanto
+os outros e as bombas chegam atrasados (confirmação ≈ RTT + 50 ms na tabela
+acima). Uma partida tem um servidor só; não há duas autoridades.
+
+Para comparar:
+
+1. Suba o mesmo build em duas regiões (a atual, nos EUA, e uma em São Paulo,
+   ex.: `gru`/`sa-east-1`), com `NET_LOG_SECONDS=60`.
+2. Do Brasil, abra uma sala em cada uma (`VITE_SERVER_URL` diferente, ou dois
+   builds) e jogue alguns minutos com F3 aberto. Anote RTT e variação,
+   confirmação, correções/min e máxima, idade do estado e o atraso de
+   interpolação adaptado.
+3. No servidor, compare `hz`, `tickAvg`/`tickMax`, `lateMax` e `droppedMs`
+   das linhas `room net` (a região não deve mudar isso; uma máquina menor sim).
+4. Para isolar a rede da máquina, rode o `netsim` com o RTT medido em cada
+   região (`rtt` e `jitter` do cenário) e compare com a tabela acima.
+
+### Limites conhecidos
+
+- Chutar uma bomba não é previsto: o boneco para nela até o servidor mostrar a
+  bomba deslizando (uma ida e volta), e então segue.
+- Item de velocidade e maldição só valem na previsão quando o estado chega:
+  os passos entre pegar e saber viram uma correção pequena.
+- A bomba de outro jogador no caminho só existe na tela quando chega: o boneco
+  previsto passa um pouco por ela e é corrigido (fica contado).
+- A interpolação dos outros não extrapola: um buraco maior que o atraso (o
+  servidor parado, um pacote retransmitido) para o boneco até chegar a amostra.
+- O passo de 60 Hz é fixo no protocolo; 30 Hz não foi necessário — o passo
+  inteiro custa ~0,15 ms por sala.
+
 ## Requisitos
 
 - Node.js >= 20.9
@@ -264,15 +467,19 @@ Em produção o servidor roda com `pnpm --filter server start` (a partir de
 apps/
   server/
     src/game/       os testes do BombGame
-    src/rooms/      ArenaRoom, ArenaState
+    src/rooms/      ArenaRoom (passo fixo, entrada, diagnóstico), ArenaState, tickStats
+    src/config.ts   as variáveis de rede, conferidas
   web/
     scripts/        build-atlas.cjs: recorta as referências e o tileset e monta o atlas
                     scenery.cjs: desenha em código o que o tileset não tem (a moita)
     src/art/        o atlas (imagem, mapa e acesso aos quadros) e o cenário lido da referência
-    src/game/       conexão com a sala, o desenho da arena, o direcional
+    scripts/        netsim.ts: servidor de verdade + robôs com rede moldada (RTT, variação, perda, engasgo)
+    src/game/       conexão com a sala, a previsão (predict, local), o relógio e a interpolação dos outros
+                    (netclock, interp), o desenho da arena, o direcional
     src/components/ arena, painel, a escolha da arena (com as miniaturas), direcional na tela, conversa, ajustes
     src/screens/    home, sala, mock
 packages/
   shared/           contract.ts (constantes, estado público, mensagens), arena.ts (a forma de uma planta e a conferência),
-                    arenas.ts (as nove plantas) e game.ts (BombGame, a regra)
+                    arenas.ts (as nove plantas), game.ts (BombGame, a regra) e net.ts (o passo fixo,
+                    o lote de comandos, a fila do servidor, a parede comum)
 ```

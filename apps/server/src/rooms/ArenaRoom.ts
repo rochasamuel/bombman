@@ -16,15 +16,21 @@ import {
   themeById,
   type TimeMessage,
   type CreateRoomOptions,
+  DEFAULT_ARENA,
+  type DiagMessage,
+  decodeBatch,
+  type NetStatsMessage,
+  TICK_MS,
   type EmoteEvent,
   type EmoteMessage,
   type ErrorMessage,
   type FxMessage,
-  type InputMessage,
   type JoinRoomOptions,
 } from "@bomb/shared";
 import { BombGame, GameError, type GamePlayer } from "@bomb/shared";
+import { netConfig } from "../config.js";
 import { ArenaRoomState, BombState, FlameState, PlayerState, PowerupState } from "./ArenaState.js";
+import { TickStats } from "./tickStats.js";
 
 const ROOM_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const ROOM_CODE_LENGTH = 5;
@@ -33,10 +39,8 @@ const LOBBY_CHANNEL = "$bomblobby";
 /** O único fechamento que é uma saída de verdade: alguém apertou "sair". */
 const CONSENTED = CloseCode.CONSENTED;
 
-/** Quantas vezes por segundo o motor avança, e de quanto em quanto a tela recebe. */
-const TICK_MS = 1000 / 60;
-/** Patches a ~30 Hz: os outros bonecos ficam ~70 ms atrás, em vez de 100 (ver `interp.ts`). */
-const PATCH_MS = 33;
+/** No máximo um aviso de engasgo a cada tanto, por sala. */
+const STALL_WARN_EVERY_MS = 10_000;
 
 /**
  * A sala: conexões, reconexão, o relógio e o espelho do motor no estado
@@ -49,9 +53,21 @@ const PATCH_MS = 33;
  */
 export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
   state = new ArenaRoomState();
-  patchRate = PATCH_MS;
+  /** Patches a ~30 Hz por padrão (`PATCH_MS`): independente do passo do motor, que é sempre 60 Hz. */
+  patchRate = netConfig.patchMs;
+  /** Uma tela manda ~30 lotes de comandos por segundo andando; muito acima disso é abuso. */
+  maxMessagesPerSecond = netConfig.maxMessagesPerSecond;
 
-  private game = new BombGame();
+  private game = new BombGame(Math.random, DEFAULT_ARENA, netConfig.input);
+  /** Quantos passos fixos o motor já deu: o carimbo `tick` do estado. */
+  private ticks = 0;
+  /** O tempo real que chegou do relógio e ainda não virou passo, em ms. */
+  private owed = 0;
+  private stats!: TickStats;
+  private lastStallWarn = -Infinity;
+  private lastNetLog = 0;
+  /** Quem pediu o diagnóstico de rede (`diag`). */
+  private watching = new Set<string>();
   private connected = new Set<string>();
   private lastEmote = new Map<string, number>();
   private holding = new Set<string>();
@@ -65,17 +81,32 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
         this.game.start();
       }),
 
-    /** A direção do dedo. Vale até a próxima: parar é mandar zero nos dois. */
-    input: (client: Client, message: InputMessage) => {
-      this.game.setInput(client.sessionId, Number(message?.dx) || 0, Number(message?.dy) || 0);
+    /**
+     * Os comandos numerados de andar e de bomba (ver `net.ts`). Um lote fora
+     * do formato cai inteiro e conta como recusado; os repetidos caem um a um.
+     */
+    input: (client: Client, message: unknown) => {
+      const commands = decodeBatch(message);
+      if (!commands) {
+        const seat = this.seatOf(client);
+        if (seat) seat.queue.rejected++;
+        return;
+      }
+      this.game.pushCommands(client.sessionId, commands);
     },
 
-    /** Um pedido de bomba. É evento e não estado: segurar a tecla não repete. */
-    bomb: (client: Client, message?: BombMessage) => {
-      const cx = Number(message?.cx);
-      const cy = Number(message?.cy);
-      const at = Number.isInteger(cx) && Number.isInteger(cy) ? { cx, cy } : null;
-      this.game.requestBomb(client.sessionId, at);
+    /**
+     * Um pedido de bomba fora dos comandos (o caminho antigo). Cai na célula
+     * em que o boneco está no servidor: a tela não escolhe a célula.
+     */
+    bomb: (client: Client, _message?: BombMessage) => {
+      this.game.requestBomb(client.sessionId);
+    },
+
+    /** Liga ou desliga o diagnóstico de rede para esta tela (`net`, uma vez por segundo). */
+    diag: (client: Client, message: DiagMessage) => {
+      if (message?.on === true) this.watching.add(client.sessionId);
+      else this.watching.delete(client.sessionId);
     },
 
     resync: (client: Client) => this.resync(client),
@@ -157,11 +188,96 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
 
     // O relógio do motor. Ele avança sempre, mesmo no lobby: é barato e
     // dispensa ligar e desligar o intervalo a cada rodada.
-    this.setSimulationInterval((dt) => {
-      this.game.tick(dt);
-      this.sync();
-    }, TICK_MS);
+    this.stats = new TickStats(performance.now(), TICK_MS);
+    this.setSimulationInterval((delta) => this.advance(delta), TICK_MS);
     this.sync();
+  }
+
+  /**
+   * O passo fixo. O intervalo do Colyseus dispara mais ou menos a cada
+   * `TICK_MS`, com o tempo real que passou; esse tempo vira passos inteiros
+   * de `TICK_MS` (o que sobra fica para o próximo disparo). O motor só anda
+   * em passos fixos: é o que deixa a previsão da tela, que anda nos mesmos
+   * passos, bater com ele. Depois de um engasgo (GC, máquina sobrecarregada),
+   * a sala recupera no máximo `MAX_CATCHUP_TICKS` passos de uma vez e joga o
+   * resto do atraso fora — senão um engasgo longo viraria uma rajada de
+   * passos que engasga de novo.
+   */
+  private advance(delta: number) {
+    const started = performance.now();
+    this.owed += delta;
+    let steps = Math.floor(this.owed / TICK_MS + 1e-9);
+    if (steps > netConfig.maxCatchUpTicks) {
+      const dropped = (steps - netConfig.maxCatchUpTicks) * TICK_MS;
+      this.stats.drop(dropped);
+      this.owed -= dropped;
+      steps = netConfig.maxCatchUpTicks;
+    }
+    for (let i = 0; i < steps; i++) {
+      this.game.tick(TICK_MS);
+      this.ticks++;
+      this.owed -= TICK_MS;
+    }
+    if (steps > 0) this.sync();
+    const now = performance.now();
+    const work = now - started;
+    this.stats.record(delta, steps, work);
+    this.warnStall(delta, work, now);
+    if (this.stats.roll(now)) this.report(now);
+  }
+
+  private warnStall(delta: number, work: number, now: number) {
+    const worst = Math.max(delta, work);
+    if (worst < netConfig.stallWarnMs || now - this.lastStallWarn < STALL_WARN_EVERY_MS) return;
+    this.lastStallWarn = now;
+    console.warn(
+      JSON.stringify({
+        msg: "room stall",
+        room: this.roomId,
+        delta: Math.round(delta),
+        work: Math.round(work * 10) / 10,
+        droppedMs: Math.round(this.stats.droppedMs),
+      }),
+    );
+  }
+
+  /** Uma vez por segundo: o diagnóstico para quem pediu, e o log estruturado se estiver ligado. */
+  private report(now: number) {
+    const { last } = this.stats;
+    for (const id of this.watching) {
+      const client = this.clients.getById(id);
+      const seat = this.game.players.find((p) => p.id === id);
+      if (!client) {
+        this.watching.delete(id);
+        continue;
+      }
+      client.send("net", {
+        ...last,
+        droppedMs: Math.round(this.stats.droppedMs),
+        patchMs: this.patchRate ?? 0,
+        queue: seat?.queue.length ?? 0,
+        inputDropped: seat?.queue.dropped ?? 0,
+        inputDuplicates: seat?.queue.duplicates ?? 0,
+        inputRejected: seat?.queue.rejected ?? 0,
+      } satisfies NetStatsMessage);
+    }
+    const every = netConfig.logEverySeconds * 1000;
+    if (every > 0 && now - this.lastNetLog >= every) {
+      this.lastNetLog = now;
+      console.log(
+        JSON.stringify({
+          msg: "room net",
+          room: this.roomId,
+          phase: this.game.phase,
+          players: this.game.players.length,
+          ...last,
+          late: this.stats.late,
+          droppedMs: Math.round(this.stats.droppedMs),
+          inputDropped: sum(this.game.players.map((p) => p.queue.dropped)),
+          inputRejected: sum(this.game.players.map((p) => p.queue.rejected)),
+        }),
+      );
+    }
   }
 
   onJoin(client: Client, options: JoinRoomOptions) {
@@ -232,7 +348,7 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
     this.connected.delete(client.sessionId);
     // Quem caiu solta o direcional: o personagem não pode seguir andando
     // sozinho até a parede enquanto a pessoa está sem conexão.
-    this.game.setInput(client.sessionId, 0, 0);
+    this.game.dropCommands(client.sessionId);
     this.holding.add(client.sessionId);
     this.sync();
 
@@ -248,6 +364,7 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
     this.holding.delete(client.sessionId);
     this.connected.delete(client.sessionId);
     this.lastEmote.delete(client.sessionId);
+    this.watching.delete(client.sessionId);
     this.game.removePlayer(client.sessionId);
     if (this.state.hostId === client.sessionId) {
       this.state.hostId = this.game.players[0]?.id ?? "";
@@ -313,16 +430,21 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
       }
     }
 
-    this.syncPlayers();
-    this.syncBombs();
+    // Bonecos e bomba chutada levam o carimbo do passo em que mudaram de lugar.
+    const movedPlayers = this.syncPlayers();
+    const movedBombs = this.syncBombs();
+    const moved = movedPlayers || movedBombs;
+    if (moved) state.tick = this.ticks;
     this.syncFlames();
     this.syncPowerups();
     this.syncLog();
     this.sendFx();
   }
 
-  private syncPlayers() {
+  /** Devolve se alguma posição mudou. */
+  private syncPlayers(): boolean {
     const { game, state } = this;
+    let moved = false;
     const rosterChanged =
       state.players.length !== game.players.length ||
       game.players.some((player, i) => state.players[i]?.id !== player.id);
@@ -339,12 +461,14 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
     game.players.forEach((player, i) => {
       const entry = state.players[i];
       entry.connected = this.connected.has(player.id);
-      // Duas casas decimais bastam para a tela, e poupam um patch por tick
-      // de um jogador parado cujo float só mudou no quinto dígito.
-      const x = Math.round(player.x * 100) / 100;
-      const y = Math.round(player.y * 100) / 100;
-      if (entry.x !== x) entry.x = x;
-      if (entry.y !== y) entry.y = y;
+      // A posição exata: com o passo fixo, parado é parado (nem o quinto
+      // dígito muda), e a previsão da tela precisa do número do motor.
+      if (entry.x !== player.x || entry.y !== player.y) {
+        entry.x = player.x;
+        entry.y = player.y;
+        moved = true;
+      }
+      entry.seq = player.queue.ack;
       entry.dir = player.dir;
       entry.moving = player.moving;
       entry.alive = player.alive;
@@ -359,10 +483,20 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
       entry.curse = player.curse;
       entry.wins = player.wins;
     });
+    return moved;
   }
 
-  private syncBombs() {
+  /** As cadeiras que ainda passam por cima da bomba, como bits de `slot`. */
+  private passersMask(passers: Set<string>): number {
+    let mask = 0;
+    for (const player of this.game.players) if (passers.has(player.id)) mask |= 1 << player.slot;
+    return mask;
+  }
+
+  /** Devolve se alguma bomba mudou de lugar (chutada). */
+  private syncBombs(): boolean {
     const { game, state } = this;
+    let moved = false;
     const same =
       state.bombs.length === game.bombs.length &&
       game.bombs.every((bomb, i) => state.bombs[i].id === bomb.id);
@@ -373,10 +507,15 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
         // Chutada, ela anda: a célula e o centro seguem o motor.
         if (entry.cx !== bomb.cx) entry.cx = bomb.cx;
         if (entry.cy !== bomb.cy) entry.cy = bomb.cy;
-        if (entry.x !== bomb.x) entry.x = bomb.x;
-        if (entry.y !== bomb.y) entry.y = bomb.y;
+        if (entry.x !== bomb.x || entry.y !== bomb.y) {
+          entry.x = bomb.x;
+          entry.y = bomb.y;
+          moved = true;
+        }
+        const passers = this.passersMask(bomb.passers);
+        if (entry.passers !== passers) entry.passers = passers;
       });
-      return;
+      return moved;
     }
     state.bombs.splice(0);
     for (const bomb of game.bombs) {
@@ -388,8 +527,10 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
       entry.y = bomb.y;
       entry.owner = bomb.owner;
       entry.pierce = bomb.pierce;
+      entry.passers = this.passersMask(bomb.passers);
       state.bombs.push(entry);
     }
+    return moved;
   }
 
   private syncFlames() {
@@ -470,6 +611,10 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
 function sanitize(value: unknown, fallback: string, maxLength: number): string {
   const text = typeof value === "string" ? value.trim().slice(0, maxLength) : "";
   return text || fallback;
+}
+
+function sum(values: number[]) {
+  return values.reduce((a, b) => a + b, 0);
 }
 
 function clamp(value: number, min: number, max: number) {

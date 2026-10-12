@@ -163,6 +163,8 @@ export type PublicPlayer = {
   curse: Curse | "";
   /** Rodadas vencidas nesta sala. */
   wins: number;
+  /** O último comando de entrada que o servidor aplicou para este jogador (ver `net.ts`). */
+  seq: number;
 };
 
 export type PublicBomb = {
@@ -175,6 +177,8 @@ export type PublicBomb = {
   y: number;
   owner: string;
   pierce: boolean;
+  /** Quem ainda está de pé em cima dela desde que nasceu, por `slot` (bit 1 << slot): para eles ela não fecha. */
+  passers: number;
 };
 
 /** O pedaço de chama: o centro, o meio de um braço, ou a ponta dele. */
@@ -211,6 +215,12 @@ export type ArenaState = {
   powerups: PublicPowerup[];
   /** Quanto falta da rodada, em ms, em segundos inteiros (arredondado para cima): só muda uma vez por segundo. */
   timeLeft: number;
+  /**
+   * O passo do motor em que algo se moveu pela última vez (bonecos, bomba
+   * chutada). Só muda junto com uma posição: é o carimbo de tempo com que a
+   * tela interpola os outros, na linha do tempo do servidor.
+   */
+  tick: number;
   /** O "3, 2, 1". Zero fora da contagem. */
   countdown: number;
   /** Quem venceu a rodada; vazio no empate ou antes do fim. */
@@ -237,10 +247,34 @@ export type JoinRoomOptions = {
   seatKey: string;
 };
 
-/** cliente -> servidor: a direção do dedo. Zero nos dois é parado. */
-export type InputMessage = { dx: number; dy: number };
-/** cliente -> servidor: uma bomba, na célula em que a tela a mostrou (o servidor confere que o boneco ainda a toca). */
-export type BombMessage = { cx?: number; cy?: number };
+/** cliente -> servidor: os comandos numerados de andar e de bomba. O formato e a conferência moram em `net.ts`. */
+export type { InputBatch as InputMessage } from "./net.js";
+/** cliente -> servidor: uma bomba, na célula em que o boneco está no servidor (o caminho antigo; a tela de hoje manda a bomba nos comandos). */
+export type BombMessage = Record<string, never>;
+/** cliente -> servidor: liga ou desliga o envio do diagnóstico de rede (`NetStatsMessage`) para esta tela. */
+export type DiagMessage = { on: boolean };
+/**
+ * servidor -> cliente, uma vez por segundo, só para quem ligou o diagnóstico:
+ * como o relógio da sala está indo e como está a fila de entrada desta tela.
+ */
+export type NetStatsMessage = {
+  /** Passos do motor por segundo, medidos. */
+  hz: number;
+  /** Quanto um passo (motor + espelho) levou, em ms: média e pior no último segundo. */
+  tickAvg: number;
+  tickMax: number;
+  /** O maior atraso do relógio da sala além do previsto, em ms (o processo engasgou). */
+  lateMax: number;
+  /** Tempo de simulação jogado fora por um engasgo maior que o alcance, em ms, desde o começo. */
+  droppedMs: number;
+  /** De quanto em quanto a sala manda o estado, em ms. */
+  patchMs: number;
+  /** A fila de comandos desta tela, no servidor: quantos esperam, quantos caíram (cheia), repetidos e lotes recusados. */
+  queue: number;
+  inputDropped: number;
+  inputDuplicates: number;
+  inputRejected: number;
+};
 /** host -> servidor: o tamanho da arena. A planta é sorteada pelo servidor entre as do tamanho, a cada rodada. */
 export type ArenaMessage = { size: string };
 /** host -> servidor: o tempo da próxima rodada, em minutos (um de `MATCH_MINUTES`, respeitando o mínimo da arena). */

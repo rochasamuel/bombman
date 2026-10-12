@@ -70,6 +70,7 @@ function stillLife(arena: ArenaDefinition, themeId: string): ArenaState {
     matchMinutes: DEFAULT_MATCH_MINUTES,
     cols: arena.cols,
     rows: arena.rows,
+    tick: 0,
     players: arena.spawns.map(([sx, sy], slot) => ({
       id: `p${slot}`,
       name: "",
@@ -90,6 +91,7 @@ function stillLife(arena: ArenaDefinition, themeId: string): ArenaState {
       invulnerable: false,
       curse: "",
       wins: 0,
+      seq: 0,
     })),
     grid: fillGrid([], arena),
     bombs: [],

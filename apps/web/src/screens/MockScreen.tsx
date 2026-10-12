@@ -165,7 +165,7 @@ function MockMatch({
         if (themeById(id)) themeRef.current = id;
       },
       input: (dx, dy) => game.setInput(ME, dx, dy),
-      bomb: (at) => game.requestBomb(ME, at),
+      bomb: () => game.requestBomb(ME),
       emote: (emote) => {
         for (const handler of emoteHandlers.current) handler({ by: ME, emote });
       },
@@ -247,10 +247,21 @@ function snapshot(game: BombGame, themeId: string): ArenaState {
     matchMinutes: game.matchMinutes,
     players: game.players.map((player) => publicPlayer(game, player)),
     grid: game.grid,
-    bombs: game.bombs.map(({ id, cx, cy, x, y, owner, pierce }) => ({ id, cx, cy, x, y, owner, pierce })),
+    bombs: game.bombs.map(({ id, cx, cy, x, y, owner, pierce, passers }) => ({
+      id,
+      cx,
+      cy,
+      x,
+      y,
+      owner,
+      pierce,
+      passers: game.players.reduce((mask, p) => (passers.has(p.id) ? mask | (1 << p.slot) : mask), 0),
+    })),
     flames: game.flames.map(({ cx, cy, kind, born }) => ({ cx, cy, kind, born })),
     powerups: game.powerups.map(({ cx, cy, kind }) => ({ cx, cy, kind })),
     timeLeft: Math.round(game.timeLeft),
+    // O /mock não tem relógio de servidor: a interpolação usa a hora da tela (ver `render.ts`).
+    tick: 0,
     countdown: game.countdown,
     winnerId: game.winnerId,
     round: game.round,
@@ -280,6 +291,7 @@ function publicPlayer(game: BombGame, player: GamePlayer): PublicPlayer {
     invulnerable: player.alive && game.time < player.invulnerableUntil,
     curse: player.curse,
     wins: player.wins,
+    seq: player.queue.ack,
   };
 }
 

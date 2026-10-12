@@ -11,6 +11,7 @@ import {
   FLAME_H,
   LEFT,
   RIGHT,
+  TICK_MS,
   TILE,
   UP,
   WALL,
@@ -24,6 +25,7 @@ import { BACKGROUND, MARGIN, STRETCH } from "../art/scenario";
 import { ornamentsOf, themeArt, type ThemeArt } from "../art/themes";
 import { bombFrame, flameStep, itemStep } from "./fuse";
 import { DELAY_MS, record, sampleAt, type Sample } from "./interp";
+import type { LocalPlayer } from "./local";
 import { idleStep, walkStep } from "./walk";
 
 /*
@@ -110,6 +112,13 @@ export class ArenaRenderer {
   private cols = 0;
   private rows = 0;
   private canvas: HTMLCanvasElement;
+  /** Quem joga nesta tela: o boneco dele é o previsto, e o relógio do servidor guia a interpolação dos outros. */
+  private local: { id: string; player: LocalPlayer } | null = null;
+  private lastNow = 0;
+  /** O instante (na linha do tempo das amostras) que este quadro desenha. */
+  private sampleNow = 0;
+  /** Onde o próprio boneco foi desenhado no quadro anterior: para o passo da caminhada. */
+  private ownAt: { x: number; y: number } | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -138,6 +147,25 @@ export class ArenaRenderer {
     this.rows = rows;
     this.canvas.width = width;
     this.canvas.height = Math.round(shownH * scale * dpr);
+  }
+
+  /** Liga a previsão do boneco de `id` e a interpolação pelo relógio do servidor. Sem isto (o `/mock`), tudo pela chegada. */
+  setLocal(id: string, player: LocalPlayer | undefined) {
+    this.local = player && id ? { id, player } : null;
+  }
+
+  /**
+   * A hora das amostras de posição e o instante a desenhar: na sala, a do
+   * SERVIDOR (o passo do motor, `state.tick`) e um instante um pouco atrás do
+   * estimado para ele agora; no `/mock`, a da tela, com atraso fixo.
+   */
+  private timeline(state: ArenaState, now: number): { stamp: number; at: number } {
+    const dt = this.lastNow ? now - this.lastNow : 0;
+    this.lastNow = now;
+    const clock = this.local?.player.clock;
+    // Na sala, sempre a linha do servidor; antes da primeira amostra, desenha a mais nova.
+    if (clock) return { stamp: state.tick * TICK_MS, at: clock.renderTime(now, dt) ?? Infinity };
+    return { stamp: now, at: now - DELAY_MS };
   }
 
   draw(state: ArenaState | null, now: number) {
@@ -172,11 +200,13 @@ export class ArenaRenderer {
      * boneco por cima.
      */
     const layer: Drawable[] = [];
+    const { stamp, at } = this.timeline(state, now);
+    this.sampleNow = at;
     this.layBlocks(layer, state, theme);
     this.layPowerups(layer, state, now);
     this.layFlames(layer, state, now);
-    this.layBombs(layer, state, now);
-    this.layPlayers(layer, ctx, state, now);
+    this.layBombs(layer, state, now, stamp);
+    this.layPlayers(layer, ctx, state, now, stamp);
     layer.sort((a, b) => a.y - b.y || a.rank - b.rank);
     for (const entry of layer) entry.draw(ctx);
     // A muralha de baixo é a mais perto de quem olha: ela e os ornamentos
@@ -324,10 +354,16 @@ export class ArenaRenderer {
     }
   }
 
-  private layBombs(layer: Drawable[], state: ArenaState, now: number) {
+  private layBombs(layer: Drawable[], state: ArenaState, now: number, stamp: number) {
     const alive = new Set<string>();
+    const predictor = this.local?.player.predictor;
     for (const bomb of state.bombs) {
       alive.add(bomb.id);
+      // A que já aparecia provisória continua o pavio de onde estava, sem recomeçar.
+      if (!this.bombSeen.has(bomb.id)) {
+        const ghostAt = bomb.owner === this.local?.id ? predictor?.ghostStart(bomb.cx, bomb.cy) : undefined;
+        if (ghostAt !== undefined) this.bombSeen.set(bomb.id, ghostAt);
+      }
       // O pavio queima desde que a tela viu a bomba; o pulso e o estouro vêm no fim do fuso.
       const { phase, step } = bombFrame(now - this.firstSeen(this.bombSeen, bomb.id, now));
       const frame = art.bomb(phase, step, bomb.pierce);
@@ -336,10 +372,23 @@ export class ArenaRenderer {
       // Parada, o centro é o da célula; chutada, segue o rastro com o mesmo atraso dos bonecos.
       let trail = this.bombTrails.get(bomb.id);
       if (!trail) this.bombTrails.set(bomb.id, (trail = []));
-      record(trail, now, bomb.x, bomb.y);
-      const { x, y } = sampleAt(trail, now - DELAY_MS);
+      record(trail, stamp, bomb.x, bomb.y);
+      const { x, y } = sampleAt(trail, this.sampleNow);
       const foot = (y + 0.5) * TILE;
       layer.push({ y: foot, rank: BOMB, draw: (ctx) => blit(ctx, frame, x * TILE - w / 2, foot - h) });
+    }
+    // As provisórias: o comando ainda não foi confirmado, e a tela já mostra a bomba.
+    if (predictor && this.local) {
+      const me = state.players.find((p) => p.id === this.local!.id);
+      for (const ghost of predictor.ghosts) {
+        if (state.bombs.some((b) => b.cx === ghost.cx && b.cy === ghost.cy)) continue;
+        const { phase, step } = bombFrame(now - ghost.at);
+        const frame = art.bomb(phase, step, !!me?.pierce);
+        const w = art.logicalWidth(frame);
+        const h = art.logicalHeight(frame);
+        const foot = (ghost.cy + 1) * TILE;
+        layer.push({ y: foot, rank: BOMB, draw: (ctx) => blit(ctx, frame, (ghost.cx + 0.5) * TILE - w / 2, foot - h) });
+      }
     }
     forget(this.bombSeen, alive);
     forget(this.bombTrails, alive);
@@ -370,13 +419,23 @@ export class ArenaRenderer {
 
   /* ------------------------------------------------------------ os bonecos */
 
-  private layPlayers(layer: Drawable[], ctx: CanvasRenderingContext2D, state: ArenaState, now: number) {
+  private layPlayers(layer: Drawable[], ctx: CanvasRenderingContext2D, state: ArenaState, now: number, stamp: number) {
     const seen = new Set<string>();
+    const own = this.local ? this.local.player.view() : null;
+    if (!own) this.ownAt = null;
 
-    for (const player of state.players) {
+    for (let player of state.players) {
       seen.add(player.id);
-      const puppet = this.puppet(player, now);
-      const moved = this.follow(puppet, player, now);
+      const puppet = this.puppet(player, stamp);
+      let moved = this.follow(puppet, player, stamp);
+      if (own && player.id === this.local?.id) {
+        // O próprio boneco: o previsto, sem atraso nenhum. O servidor só o corrige (ver `predict.ts`).
+        moved = this.ownAt ? Math.hypot(own.x - this.ownAt.x, own.y - this.ownAt.y) : 0;
+        this.ownAt = { x: own.x, y: own.y };
+        puppet.x = own.x;
+        puppet.y = own.y;
+        player = { ...player, x: own.x, y: own.y, dir: own.dir, moving: own.moving };
+      }
       if (player.alive) puppet.stride += moved * TILE;
       else puppet.stride = 0;
 
@@ -453,13 +512,13 @@ export class ArenaRenderer {
     }
   }
 
-  private puppet(player: PublicPlayer, now: number): Puppet {
+  private puppet(player: PublicPlayer, stamp: number): Puppet {
     let puppet = this.puppets.get(player.id);
     if (!puppet) {
       puppet = {
         x: player.x,
         y: player.y,
-        samples: [{ t: now - DELAY_MS, x: player.x, y: player.y }],
+        samples: [{ t: stamp, x: player.x, y: player.y }],
         diedAt: 0,
         stride: 0,
       };
@@ -469,19 +528,20 @@ export class ArenaRenderer {
   }
 
   /**
-   * Leva o boneco para onde o servidor dizia que ele estava há `DELAY_MS`
-   * (ver `interp.ts`). Devolve quanto ele andou na tela, em células. Morto,
-   * ele fica onde morreu, sem histórico.
+   * Leva o boneco para onde o servidor dizia que ele estava no instante que
+   * este quadro desenha (ver `interp.ts`). `stamp` é a hora da posição que o
+   * estado traz. Devolve quanto ele andou na tela, em células. Morto, ele
+   * fica onde morreu, sem histórico.
    */
-  private follow(puppet: Puppet, player: PublicPlayer, now: number): number {
+  private follow(puppet: Puppet, player: PublicPlayer, stamp: number): number {
     if (!player.alive) {
       puppet.samples.length = 0;
       puppet.x = player.x;
       puppet.y = player.y;
       return 0;
     }
-    record(puppet.samples, now, player.x, player.y);
-    const { x, y } = sampleAt(puppet.samples, now - DELAY_MS);
+    record(puppet.samples, stamp, player.x, player.y);
+    const { x, y } = sampleAt(puppet.samples, this.sampleNow);
     const moved = Math.hypot(x - puppet.x, y - puppet.y);
     puppet.x = x;
     puppet.y = y;

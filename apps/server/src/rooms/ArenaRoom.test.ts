@@ -1,5 +1,16 @@
 import { boot, type ColyseusTestServer } from "@colyseus/testing";
-import { COUNTDOWN, DEFAULT_ARENA, DEFAULT_THEME, arenaById, arenasOfSize, fillGrid } from "@bomb/shared";
+import {
+  COUNTDOWN,
+  DEFAULT_ARENA,
+  DEFAULT_THEME,
+  TICK_MS,
+  arenaById,
+  arenasOfSize,
+  commandCode,
+  commandDistance,
+  fillGrid,
+  type NetStatsMessage,
+} from "@bomb/shared";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import appConfig from "../app.config.js";
 import type { BombGame } from "@bomb/shared";
@@ -55,15 +66,18 @@ describe("a sala", () => {
     game.tick(COUNTDOWN);
     expect(game.phase).toBe("playing");
 
-    clients[0].send("input", { dx: 1, dy: 0 });
-    clients[0].send("bomb");
+    // Uma bomba no lugar e quinze passos para a direita, numerados a partir de 1.
+    clients[0].send("input", { seq: 1, runs: [[commandCode(0, 0, true), 1], [commandCode(1, 0, false), 15]] });
     await clients[0].waitForMessage("fx", 1000);
-    await new Promise((done) => setTimeout(done, 250));
+    await new Promise((done) => setTimeout(done, 400));
     await room.waitForNextPatch();
     expect(room.state.bombs.length).toBe(1);
+    expect(room.state.bombs[0]).toMatchObject({ cx: 1, cy: 1 });
     const me = room.state.players.find((p) => p.id === clients[0].sessionId)!;
-    expect(me.x).toBeGreaterThan(1.5);
-    expect(me.moving).toBe(true);
+    // Cada comando é um passo fixo: a distância não depende de quando o lote chegou.
+    expect(me.x).toBeCloseTo(1.5 + 15 * commandDistance({ speed: 0, curse: "" }), 9);
+    expect(me.seq).toBe(16);
+    expect(room.state.tick).toBeGreaterThan(0);
   });
 
   it("abre com a arena da referência; o host escolhe o tamanho, e a planta é sorteada para todos", async () => {
@@ -240,5 +254,76 @@ describe("a sala", () => {
     expect(room.state.players.length).toBe(2);
     expect(room.state.players[1].id).toBe(back.sessionId);
     expect(room.state.players[1].slot).toBe(1);
+  });
+});
+
+describe("a entrada pela rede", () => {
+  async function playing() {
+    const { room, clients } = await seated(2);
+    clients[0].send("start");
+    await room.waitForNextPatch();
+    engine(room).tick(COUNTDOWN);
+    return { room, clients, game: engine(room) };
+  }
+  const right = (count: number): [number, number] => [commandCode(1, 0, false), count];
+
+  it("aplica cada comando uma vez: um lote repetido não anda de novo", async () => {
+    const { room, clients, game } = await playing();
+    clients[0].send("input", { seq: 1, runs: [right(10)] });
+    clients[0].send("input", { seq: 1, runs: [right(10)] });
+    clients[0].send("input", { seq: 5, runs: [right(6)] });
+    await new Promise((done) => setTimeout(done, 400));
+    const me = game.players[0];
+    expect(me.x).toBeCloseTo(1.5 + 10 * commandDistance(me), 9);
+    expect(me.queue.ack).toBe(10);
+    expect(me.queue.duplicates).toBe(16);
+    await room.waitForNextPatch();
+    expect(room.state.players[0].seq).toBe(10);
+  });
+
+  it("recusa lote malformado inteiro e conta", async () => {
+    const { room, clients, game } = await playing();
+    const bad = [
+      { dx: 1, dy: 0 },
+      { seq: 0, runs: [right(1)] },
+      { seq: 1.5, runs: [right(1)] },
+      { seq: 1, runs: [[99, 1]] },
+      { seq: 1, runs: [[commandCode(1, 1, false), 0]] },
+      { seq: 1, runs: [[commandCode(0, 0, true), 3]] },
+      { seq: 1, runs: [right(31)] },
+      { seq: 1, runs: "x" },
+      null,
+    ];
+    for (const message of bad) clients[0].send("input", message);
+    await new Promise((done) => setTimeout(done, 200));
+    await room.waitForNextPatch();
+    const me = game.players[0];
+    expect(me.queue.rejected).toBe(bad.length);
+    expect(me.x).toBe(1.5);
+    expect(me.queue.ack).toBe(0);
+  });
+
+  it("não deixa andar mais rápido que o relógio, por mais comandos que cheguem", async () => {
+    const { clients, game } = await playing();
+    const me = game.players[0];
+    const ackBefore = me.queue.ack;
+    const started = performance.now();
+    // Sessenta comandos de uma vez: um segundo de caminhada, num lote só.
+    clients[0].send("input", { seq: 1, runs: [right(30), right(30)] });
+    await new Promise((done) => setTimeout(done, 150));
+    const elapsedTicks = (performance.now() - started) / TICK_MS;
+    // No máximo o tempo que passou mais o crédito guardado (`INPUT_CREDIT_MAX`), com folga para o relógio.
+    expect(me.queue.ack - ackBefore).toBeLessThanOrEqual(Math.ceil(elapsedTicks) + 8 + 2);
+    expect(me.queue.ack).toBeLessThan(60);
+  });
+
+  it("manda o diagnóstico de rede só para quem pediu", async () => {
+    const { clients } = await seated(2);
+    clients[0].send("diag", { on: true });
+    const stats = (await clients[0].waitForMessage("net", 2500)) as NetStatsMessage;
+    expect(stats.hz).toBeGreaterThan(30);
+    expect(stats.patchMs).toBeGreaterThan(0);
+    expect(stats.tickAvg).toBeGreaterThanOrEqual(0);
+    await expect(clients[1].waitForMessage("net", 1200)).rejects.toBeTruthy();
   });
 });

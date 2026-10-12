@@ -1,25 +1,31 @@
 /*
- * A interpolação de posição. O servidor manda a posição de cada jogador a
- * ~30 Hz; entre um patch e outro a tela precisa de um lugar para desenhar o
- * boneco. Em vez de perseguir a última posição (que chega e espera, dando um
- * tranco a cada patch), a tela guarda as últimas amostras com a hora em que
- * chegaram e desenha o boneco onde ele estava há um atraso fixo, em linha
- * reta entre a amostra anterior e a seguinte. Nada aqui conhece canvas: é só
- * aritmética, e por isso tem teste.
+ * A interpolação de posição dos OUTROS bonecos (o próprio é previsto, ver
+ * `predict.ts`). O servidor manda a posição de cada jogador a ~30 Hz; entre
+ * um patch e outro a tela precisa de um lugar para desenhar o boneco. Em vez
+ * de perseguir a última posição (que chega e espera, dando um tranco a cada
+ * patch), a tela guarda as últimas amostras com a hora delas e desenha o
+ * boneco onde ele estava há um atraso, em linha reta entre a amostra anterior
+ * e a seguinte. Na sala, a hora é a do SERVIDOR (o passo do motor, ver
+ * `netclock.ts`); no `/mock`, sem servidor, é a da chegada. Nada aqui conhece
+ * canvas: é só aritmética, e por isso tem teste.
  */
 
 export type Sample = { t: number; x: number; y: number };
 
-/**
- * Dois patches de atraso (a ~30 Hz): sempre há uma amostra à frente para
- * interpolar. Vale para todos os bonecos, o próprio inclusive (não há
- * previsão: a tela desenha só o que o servidor confirmou), e as bombas chutadas.
- */
+/** O atraso fixo do `/mock`, que não tem relógio de servidor (na sala ele se ajusta, ver `netclock.ts`). */
 export const DELAY_MS = 70;
 /** Quantas amostras guardar; sobra para um patch atrasado. */
 export const SAMPLES = 8;
 /** Um salto maior que isso, em células, é renascimento: não se interpola. */
 export const JUMP_CELLS = 2;
+/**
+ * Uma amostra que chega depois de tanto tempo parado (ms) não é interpolada
+ * desde a anterior — o boneco não ficou andando devagar o tempo todo, ele
+ * estava parado e saiu agora. Antes dela entra uma cópia da anterior, um
+ * pouco antes (`RESUME_MS`).
+ */
+export const HOLD_GAP_MS = 100;
+export const RESUME_MS = 50;
 
 /**
  * Registra a posição que acabou de chegar, se mudou. Um salto grande apaga o
@@ -28,11 +34,16 @@ export const JUMP_CELLS = 2;
 export function record(samples: Sample[], t: number, x: number, y: number): void {
   const last = samples[samples.length - 1];
   if (last && last.x === x && last.y === y) return;
-  if (last && (Math.abs(x - last.x) > JUMP_CELLS || Math.abs(y - last.y) > JUMP_CELLS)) {
+  if (last && t < last.t) {
+    // Uma amostra mais velha que a última (outra linha do tempo): começa de novo.
     samples.length = 0;
+  } else if (last && (Math.abs(x - last.x) > JUMP_CELLS || Math.abs(y - last.y) > JUMP_CELLS)) {
+    samples.length = 0;
+  } else if (last && t - last.t > HOLD_GAP_MS) {
+    samples.push({ t: t - RESUME_MS, x: last.x, y: last.y });
   }
   samples.push({ t, x, y });
-  if (samples.length > SAMPLES) samples.shift();
+  while (samples.length > SAMPLES) samples.shift();
 }
 
 /**

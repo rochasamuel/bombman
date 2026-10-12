@@ -12,8 +12,13 @@ export class PlayerState extends Schema {
   @type("string") name = "";
   @type("uint8") slot = 0;
   @type("boolean") connected = true;
-  @type("float32") x = 0;
-  @type("float32") y = 0;
+  /**
+   * float64: a tela volta exatamente a esta posição e reaplica os comandos
+   * ainda não confirmados. Arredondada, a conta dela nunca bateria com a do
+   * motor, e toda chegada de estado seria uma pequena correção.
+   */
+  @type("float64") x = 0;
+  @type("float64") y = 0;
   @type("uint8") dir = 0;
   @type("boolean") moving = false;
   @type("boolean") alive = false;
@@ -27,6 +32,8 @@ export class PlayerState extends Schema {
   @type("boolean") invulnerable = false;
   @type("string") curse = "";
   @type("uint8") wins = 0;
+  /** O último comando de entrada aplicado: a tela descarta até ele e reaplica o resto. */
+  @type("uint32") seq = 0;
 }
 
 export class BombState extends Schema {
@@ -38,6 +45,8 @@ export class BombState extends Schema {
   @type("float32") y = 0;
   @type("string") owner = "";
   @type("boolean") pierce = false;
+  /** Quem ainda passa por ela, por `slot` (1 << slot): a previsão da tela precisa saber se ela fecha. */
+  @type("uint8") passers = 0;
 }
 
 export class FlameState extends Schema {
@@ -73,6 +82,8 @@ export class ArenaRoomState extends Schema {
   @type([FlameState]) flames = new ArraySchema<FlameState>();
   @type([PowerupState]) powerups = new ArraySchema<PowerupState>();
   @type("uint32") timeLeft = MATCH_TIME;
+  /** O passo do motor da última vez que uma posição mudou: o carimbo da interpolação na tela. */
+  @type("uint32") tick = 0;
   @type("uint8") countdown = 0;
   @type("string") winnerId = "";
   @type("uint8") round = 0;

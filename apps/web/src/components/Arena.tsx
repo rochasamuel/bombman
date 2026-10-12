@@ -11,6 +11,7 @@ import { useUi } from "../store/ui";
 import { ConfigMenu } from "./ConfigMenu";
 import { EmotePicker } from "./EmotePicker";
 import { Hud } from "./Hud";
+import { NetOverlay } from "./NetOverlay";
 import { TouchPad } from "./TouchPad";
 
 type Props = {
@@ -18,6 +19,9 @@ type Props = {
   state: ArenaState;
   /** O estado vivo, para o canvas. Nulo na arena de mentira do /mock. */
   live: RoomConnection["live"];
+  /** O próprio boneco previsto e o relógio do servidor. Ausente no /mock. */
+  local?: RoomConnection["local"];
+  setDiag?: RoomConnection["setDiag"];
   sessionId: string;
   actions: RoomConnection["actions"];
   onFx?: RoomConnection["onFx"];
@@ -32,7 +36,7 @@ checkSprites();
  * redesenha por `requestAnimationFrame` lendo o estado vivo; o React só
  * redesenha o que está em volta, quando o retrato muda.
  */
-export function Arena({ state, live, sessionId, actions, onFx, onEmote, onExit }: Props) {
+export function Arena({ state, live, local, setDiag, sessionId, actions, onFx, onEmote, onExit }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<ArenaRenderer | null>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -98,22 +102,44 @@ export function Arena({ state, live, sessionId, actions, onFx, onEmote, onExit }
     if (!canvas) return;
     const renderer = (rendererRef.current ??= new ArenaRenderer(canvas));
     renderer.fit(scale, cols, rows);
+    renderer.setLocal(sessionId, local);
     let handle = 0;
     const loop = (now: number) => {
+      // Os passos fixos do próprio boneco primeiro (entrada -> previsão -> envio), depois o desenho.
+      local?.frame(live(), now);
       // O estado vivo primeiro; o retrato é a reserva do /mock, que não tem um.
       renderer.draw(live() ?? stateRef.current, now);
       handle = requestAnimationFrame(loop);
     };
     handle = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(handle);
-  }, [live, scale, cols, rows]);
+  }, [live, local, sessionId, scale, cols, rows]);
+
+  /*
+   * A bomba própria toca o som na hora em que aparece provisória; o evento do
+   * servidor para ela, que chega uma ida e volta depois, não toca de novo.
+   * Uma bomba própria que a tela não previu (a maldição das bombas sem parar)
+   * toca pelo servidor, como as dos outros.
+   */
+  const placedLocally = useRef(0);
+  useEffect(
+    () =>
+      local?.subscribePlace(() => {
+        placedLocally.current++;
+        playSound("place");
+      }),
+    [local],
+  );
 
   /* Os sons seguem os eventos, não o estado. */
   useEffect(() => {
     if (!onFx) return;
     return onFx((events: FxEvent[]) => {
       for (const event of events) {
-        if (event.k === "place") playSound("place");
+        if (event.k === "place") {
+          if (event.by === sessionId && placedLocally.current > 0) placedLocally.current--;
+          else playSound("place");
+        }
         else if (event.k === "explode") playSound("explode", 0.35);
         else if (event.k === "pickup") playSound("pickup");
         else if (event.k === "die") playSound("die");
@@ -146,6 +172,8 @@ export function Arena({ state, live, sessionId, actions, onFx, onEmote, onExit }
       </header>
 
       <Hud state={state} sessionId={sessionId} bubbles={bubbles} />
+
+      {local && <NetOverlay local={local} setDiag={setDiag} />}
 
       <div ref={frameRef} className="relative flex w-full justify-center">
         <canvas
