@@ -140,6 +140,20 @@ export const CURSE_NAME: Record<Curse, string> = {
   single: "uma bomba só",
 };
 
+/** O que a maldição faz, para o aviso de quem a carrega. */
+export const CURSE_HINT: Record<Curse, string> = {
+  slow: "você anda devagar",
+  fast: "você anda rápido demais",
+  reverse: "os controles estão trocados",
+  slide: "você não para: segue até bater",
+  weak: "suas bombas têm alcance 1",
+  diarrhea: "você solta bombas sem parar",
+  constipation: "você não consegue soltar bombas",
+  shortfuse: "suas bombas explodem na metade do tempo",
+  longfuse: "suas bombas demoram o dobro para explodir",
+  single: "só uma bomba por vez",
+};
+
 /** O pavio das bombas de quem tem esta maldição (ou nenhuma). */
 export function bombFuse(curse: Curse | ""): number {
   if (curse === "shortfuse") return BOMB_FUSE / 2;

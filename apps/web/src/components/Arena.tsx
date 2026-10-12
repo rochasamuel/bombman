@@ -9,6 +9,7 @@ import { playSound } from "../lib/sound";
 import { useMediaQuery } from "../lib/useMediaQuery";
 import { useUi } from "../store/ui";
 import { ConfigMenu } from "./ConfigMenu";
+import { CurseTip } from "./CurseTip";
 import { EmotePicker } from "./EmotePicker";
 import { Hud } from "./Hud";
 import { NetOverlay } from "./NetOverlay";
@@ -220,6 +221,8 @@ export function Arena({ state, live, local, setDiag, sessionId, actions, onFx, o
           </p>
         )}
       </div>
+
+      <CurseTip me={state.phase === "playing" ? me : undefined} />
 
       {/* Embaixo: a dica (ou o direcional) e o balão, à direita. O registro da
           arena fica escondido por enquanto; `state.log` continua chegando. */}
