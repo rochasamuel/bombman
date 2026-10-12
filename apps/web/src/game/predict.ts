@@ -1,8 +1,10 @@
 import {
   FLOOR,
+  bombLimit,
   cellBlocked,
   cellIndex,
   commandDistance,
+  cursedInput,
   moveOnRails,
   touches,
   type ArenaState,
@@ -156,7 +158,9 @@ export class Predictor {
     this.prev = { x: walker.x, y: walker.y };
     dx = Math.sign(dx);
     dy = Math.sign(dy);
-    this.moving = dx !== 0 || dy !== 0;
+    // O sem freio anda sem dedo: o comando parado também vai, e o motor o vira em passo.
+    const walk = cursedInput(me.curse, dx, dy, walker.dir);
+    this.moving = walk.dx !== 0 || walk.dy !== 0;
     if (!this.moving && !bomb) return null;
 
     const cmd: MoveCommand = { seq: ++this.seq, dx, dy, bomb };
@@ -314,12 +318,13 @@ export class Predictor {
         this.passing.add(key(ghost.cx, ghost.cy));
       }
     }
-    if (cmd.dx === 0 && cmd.dy === 0) return;
+    const { dx, dy } = cursedInput(me.curse, cmd.dx, cmd.dy, walker.dir);
+    if (dx === 0 && dy === 0) return;
     const upTo = cmd.seq;
     const bombHere = (cx: number, cy: number) =>
       state.bombs.some((b) => b.cx === cx && b.cy === cy) ||
       this.ghosts.some((g) => g.seq <= upTo && g.cx === cx && g.cy === cy);
-    moveOnRails(walker, cmd.dx, cmd.dy, commandDistance(me), (cx, cy) =>
+    moveOnRails(walker, dx, dy, commandDistance(me), (cx, cy) =>
       cellBlocked(state, cx, cy, bombHere, (bx, by) => this.passing.has(key(bx, by))),
     );
     // Saiu de cima de uma bomba: ela passa a fechar (o `leaveBombs` do motor).
@@ -340,7 +345,7 @@ export class Predictor {
     if (state.bombs.some((b) => b.cx === cx && b.cy === cy)) return false;
     if (this.ghosts.some((g) => g.cx === cx && g.cy === cy)) return false;
     const mine = state.bombs.filter((b) => b.owner === me.id).length + this.ghosts.length;
-    return mine < me.bombs;
+    return mine < bombLimit(me.bombs, me.curse);
   }
 
   /** As provisórias até `ack` já foram decididas pelo servidor: saem (a de verdade, se houver, está no estado). */

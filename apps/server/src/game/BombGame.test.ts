@@ -12,10 +12,13 @@ import {
   FLOOR,
   LIVES,
   MATCH_MINUTES,
+  MAX_SPEED_LEVEL,
+  RIGHT,
   WALL,
   arenaById,
   defineArena,
   minMinutesFor,
+  type Curse,
 } from "@bomb/shared";
 import { describe, expect, it } from "vitest";
 import { BombGame } from "@bomb/shared";
@@ -636,5 +639,81 @@ describe("morrer e vencer", () => {
     run(game, 5 * 60_000 + 500);
     expect(game.phase).toBe("finished");
     expect(game.winnerId).toBe(p.id);
+  });
+});
+
+describe("as maldições", () => {
+  /** Um jogo com o primeiro jogador amaldiçoado até o fim do teste. */
+  function cursed(curse: Curse) {
+    const game = open();
+    const [p] = game.players;
+    p.curse = curse;
+    p.curseUntil = Number.MAX_SAFE_INTEGER;
+    return { game, p };
+  }
+
+  it("rápido demais anda mais que a bota no máximo", () => {
+    const { game, p } = cursed("fast");
+    const free = open();
+    free.players[0].speed = MAX_SPEED_LEVEL;
+    for (const g of [game, free]) g.setInput(g.players[0].id, 1, 0);
+    run(game, 400);
+    run(free, 400);
+    expect(p.x).toBeGreaterThan(free.players[0].x);
+  });
+
+  it("invertido troca os lados", () => {
+    const { game, p } = cursed("reverse");
+    game.setInput(p.id, -1, 0);
+    run(game, 300);
+    expect(p.x).toBeGreaterThan(1.5);
+    expect(p.dir).toBe(RIGHT);
+  });
+
+  it("sem freio segue andando sem dedo até a parede", () => {
+    const { game, p } = cursed("slide");
+    game.setInput(p.id, 1, 0);
+    run(game, 200);
+    game.setInput(p.id, 0, 0);
+    const stopped = p.x;
+    run(game, 9000);
+    expect(p.x).toBeGreaterThan(stopped + 3);
+    expect(p.x).toBeLessThan(COLS - 1);
+  });
+
+  it("sem bomba não solta nenhuma", () => {
+    const { game, p } = cursed("constipation");
+    game.requestBomb(p.id);
+    game.tick(16);
+    expect(game.bombs).toHaveLength(0);
+  });
+
+  it("uma bomba só, por mais que tenha", () => {
+    const { game, p } = cursed("single");
+    p.bombs = 4;
+    game.requestBomb(p.id);
+    game.tick(16);
+    game.setInput(p.id, 1, 0);
+    run(game, 400);
+    game.requestBomb(p.id);
+    game.tick(16);
+    expect(game.bombs).toHaveLength(1);
+  });
+
+  it("pavio curto explode na metade do tempo; pavio longo, no dobro", () => {
+    const short = cursed("shortfuse");
+    short.game.requestBomb(short.p.id);
+    short.game.tick(16);
+    expect(short.game.bombs[0].fuse).toBe(BOMB_FUSE / 2);
+    run(short.game, BOMB_FUSE / 2);
+    expect(short.game.bombs).toHaveLength(0);
+
+    const long = cursed("longfuse");
+    long.game.requestBomb(long.p.id);
+    long.game.tick(16);
+    run(long.game, BOMB_FUSE + 100);
+    expect(long.game.bombs).toHaveLength(1);
+    run(long.game, BOMB_FUSE);
+    expect(long.game.bombs).toHaveLength(0);
   });
 });

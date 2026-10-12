@@ -18,11 +18,12 @@ export const BOMB_BOOM_MS = BOMB_STEPS.boom * FX_FRAME_MS;
 /**
  * O quadro da bomba pela idade dela: o pavio dá voltas até faltar pulso e
  * estouro para o fim do fuso; o pulso toca uma vez; o estouro fecha. Se o
- * servidor demorar a explodir, ela segura o último quadro do estouro.
+ * servidor demorar a explodir, ela segura o último quadro do estouro. `fuse`
+ * é o pavio dela (as maldições de pavio o encurtam ou alongam).
  */
-export function bombFrame(ageMs: number): { phase: BombPhase; step: number } {
-  const pulseAt = BOMB_FUSE - BOMB_BOOM_MS - BOMB_PULSE_MS;
-  const boomAt = BOMB_FUSE - BOMB_BOOM_MS;
+export function bombFrame(ageMs: number, fuse: number = BOMB_FUSE): { phase: BombPhase; step: number } {
+  const pulseAt = fuse - BOMB_BOOM_MS - BOMB_PULSE_MS;
+  const boomAt = fuse - BOMB_BOOM_MS;
   if (ageMs >= boomAt) return { phase: "boom", step: clampStep((ageMs - boomAt) / FX_FRAME_MS, BOMB_STEPS.boom) };
   if (ageMs >= pulseAt) return { phase: "pulse", step: clampStep((ageMs - pulseAt) / FX_FRAME_MS, BOMB_STEPS.pulse) };
   return { phase: "fuse", step: Math.floor(Math.max(0, ageMs) / FX_FRAME_MS) % BOMB_STEPS.fuse };

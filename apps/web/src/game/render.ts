@@ -15,6 +15,7 @@ import {
   TILE,
   UP,
   WALL,
+  bombFuse,
   cellIndex,
   type ArenaState,
   type PublicPlayer,
@@ -365,7 +366,7 @@ export class ArenaRenderer {
         if (ghostAt !== undefined) this.bombSeen.set(bomb.id, ghostAt);
       }
       // O pavio queima desde que a tela viu a bomba; o pulso e o estouro vêm no fim do fuso.
-      const { phase, step } = bombFrame(now - this.firstSeen(this.bombSeen, bomb.id, now));
+      const { phase, step } = bombFrame(now - this.firstSeen(this.bombSeen, bomb.id, now), bomb.fuse || undefined);
       const frame = art.bomb(phase, step, bomb.pierce);
       const w = art.logicalWidth(frame);
       const h = art.logicalHeight(frame);
@@ -382,7 +383,7 @@ export class ArenaRenderer {
       const me = state.players.find((p) => p.id === this.local!.id);
       for (const ghost of predictor.ghosts) {
         if (state.bombs.some((b) => b.cx === ghost.cx && b.cy === ghost.cy)) continue;
-        const { phase, step } = bombFrame(now - ghost.at);
+        const { phase, step } = bombFrame(now - ghost.at, bombFuse(me?.curse ?? ""));
         const frame = art.bomb(phase, step, !!me?.pierce);
         const w = art.logicalWidth(frame);
         const h = art.logicalHeight(frame);

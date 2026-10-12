@@ -69,6 +69,7 @@ function snapshot(game: BombGame, tick: number): ArenaState {
       y: b.y,
       owner: b.owner,
       pierce: b.pierce,
+      fuse: b.fuse,
       passers: game.players.reduce((m, p) => (b.passers.has(p.id) ? m | (1 << p.slot) : m), 0),
     })),
     flames: [],
@@ -357,5 +358,45 @@ describe("a bomba prevista", () => {
       script: (t) => (t === 5 ? { dx: 0, dy: 0, bomb: true } : t < 50 ? { dx: 1, dy: 0 } : t < 120 ? { dx: -1, dy: 0 } : { dx: 0, dy: 0 }),
     });
     expect(predictor.metrics.corrections).toBe(0);
+  });
+});
+
+describe("a previsão com maldição de andar", () => {
+  for (const curse of ["fast", "reverse", "slide"] as const) {
+    it(`${curse}: a tela e o motor terminam no mesmo lugar`, () => {
+      const { game, predictor } = simulate({
+        ticks: 600,
+        up: 6,
+        down: 6,
+        script: lap,
+        meddle: (g, tick) => {
+          if (tick !== 1) return;
+          g.players[0].curse = curse;
+          g.players[0].curseUntil = Number.MAX_SAFE_INTEGER;
+        },
+      });
+      // A maldição chega à tela depois do motor: há correção no começo, e o desenho a desfaz com o tempo.
+      expect(predictor.metrics.large).toBe(0);
+      const view = predictor.view(1, 60_000)!;
+      expect(view.x).toBe(game.players[0].x);
+      expect(view.y).toBe(game.players[0].y);
+    });
+  }
+
+  it("sem freio: parado, a tela continua mandando passos", () => {
+    const { commands, game } = simulate({
+      ticks: 120,
+      up: 3,
+      down: 3,
+      script: (tick) => (tick <= 10 ? { dx: 1, dy: 0 } : { dx: 0, dy: 0 }),
+      meddle: (g, tick) => {
+        if (tick !== 1) return;
+        g.players[0].curse = "slide";
+        g.players[0].curseUntil = Number.MAX_SAFE_INTEGER;
+      },
+    });
+    expect(commands.length).toBeGreaterThan(100);
+    // Soltou o dedo por volta de x = 2,1 e seguiu até o primeiro tijolo.
+    expect(game.players[0].x).toBeGreaterThan(3);
   });
 });

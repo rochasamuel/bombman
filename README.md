@@ -18,8 +18,9 @@ fogo, 💣 mais bombas, 👟 mais velocidade, 🦶 o chute (andar contra uma bom
 empurra: ela desliza a 6 células/s e para na última célula livre antes de
 bloco, bomba ou jogador, com o pavio contando), ⚡ a perfurante (as bombas
 nascem vermelhas com uma ponta dourada e a explosão delas atravessa tijolos e bombas, parando só em
-muralha e pilar; morrer leva o chute e a perfurante, só eles), 💀 uma maldição de quinze segundos (uma caveirinha paira sobre a cabeça enquanto dura) (lento, fogo fraco ou bombas
-sem parar). Quem perde as três vidas sai; a última
+muralha e pilar; morrer leva o chute e a perfurante, só eles), 💀 uma maldição de quinze segundos (uma caveirinha paira sobre a cabeça enquanto dura) (uma sorteada entre dez: lento, rápido demais, invertido,
+sem freio, fogo fraco, bombas sem parar, sem bomba, pavio curto, pavio longo
+ou uma bomba só). Quem perde as três vidas sai; a última
 pessoa de pé vence. Deu o tempo (3 minutos), vence quem tiver mais vidas.
 
 ## Arquitetura
@@ -413,7 +414,8 @@ Para comparar:
 - Chutar uma bomba não é previsto: o boneco para nela até o servidor mostrar a
   bomba deslizando (uma ida e volta), e então segue.
 - Item de velocidade e maldição só valem na previsão quando o estado chega:
-  os passos entre pegar e saber viram uma correção pequena.
+  os passos entre pegar e saber viram uma correção (pequena; no invertido,
+  pegando a caveira em velocidade, pode chegar a uma ida e volta de passos).
 - A bomba de outro jogador no caminho só existe na tela quando chega: o boneco
   previsto passa um pouco por ela e é corrigido (fica contado).
 - A interpolação dos outros não extrapola: um buraco maior que o atraso (o

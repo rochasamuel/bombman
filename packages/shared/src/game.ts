@@ -1,6 +1,7 @@
 import {
   BASE_SPEED,
-  BOMB_FUSE,
+  bombFuse,
+  bombLimit,
   BRICK,
   BUSH,
   COUNTDOWN,
@@ -46,7 +47,7 @@ import {
   type Powerup,
 } from "./contract.js";
 import { ARENA_SIZE_NAME, fillGrid, type ArenaDefinition } from "./arena.js";
-import { moveOnRails, moveSpeed } from "./move.js";
+import { cursedInput, moveOnRails, moveSpeed } from "./move.js";
 import { DEFAULT_INPUT_LIMITS, InputQueue, TICK_MS, cellBlocked, type InputQueueLimits, type MoveCommand } from "./net.js";
 import { DEFAULT_ARENA } from "./arenas.js";
 
@@ -122,6 +123,8 @@ export type Bomb = {
   y: number;
   owner: string;
   explodeAt: number;
+  /** O pavio com que nasceu, em ms (ver `bombFuse`). */
+  fuse: number;
   range: number;
   /** A explosão atravessa tijolos e bombas (só muralha e pilar a param). */
   pierce: boolean;
@@ -494,7 +497,7 @@ export class BombGame {
       return;
     }
 
-    const { dx, dy } = player.input;
+    const { dx, dy } = cursedInput(player.curse, player.input.dx, player.input.dy, player.dir);
     player.moving = dx !== 0 || dy !== 0;
     if (!player.moving) return;
     this.movePlayer(player, dx, dy, moveSpeed(player.speed, player.curse) * seconds);
@@ -509,9 +512,10 @@ export class BombGame {
     for (const cmd of player.queue.take(dt / TICK_MS)) {
       if (!player.alive) break;
       if (cmd.bomb) this.placeBomb(player);
-      if (cmd.dx === 0 && cmd.dy === 0) continue;
+      const { dx, dy } = cursedInput(player.curse, cmd.dx, cmd.dy, player.dir);
+      if (dx === 0 && dy === 0) continue;
       player.movingUntil = this.time + MOVING_HOLD_MS;
-      this.movePlayer(player, cmd.dx, cmd.dy, commandDistance(player));
+      this.movePlayer(player, dx, dy, commandDistance(player));
     }
     player.moving = this.time < player.movingUntil;
   }
@@ -649,13 +653,14 @@ export class BombGame {
     const cy = asked ? at.cy : Math.floor(player.y);
     if (this.bombAt(cx, cy)) return false;
     const mine = this.bombs.filter((b) => b.owner === player.id).length;
-    if (mine >= player.bombs) return false;
+    if (mine >= bombLimit(player.bombs, player.curse)) return false;
 
     // Quem o corpo toca a célula passa por ela até sair de cima (`leaveBombs`).
     const passers = new Set<string>();
     for (const other of this.players) {
       if (other.alive && touches(other, cx, cy)) passers.add(other.id);
     }
+    const fuse = bombFuse(player.curse);
     this.bombs.push({
       id: `b${this.nextBombId++}`,
       cx,
@@ -663,7 +668,8 @@ export class BombGame {
       x: cx + 0.5,
       y: cy + 0.5,
       owner: player.id,
-      explodeAt: this.time + BOMB_FUSE,
+      explodeAt: this.time + fuse,
+      fuse,
       range: player.curse === "weak" ? 1 : player.range,
       pierce: player.pierce,
       sliding: null,

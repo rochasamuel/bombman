@@ -105,14 +105,46 @@ export const POWERUP_NAME: Record<Powerup, string> = {
 export const KICK_SPEED = 6;
 
 /** As maldições da caveira. Uma sorteada por caveira, pelo tempo de `CURSE_TIME`. */
-export const CURSES = ["slow", "weak", "diarrhea"] as const;
+export const CURSES = [
+  "slow",
+  "fast",
+  "reverse",
+  "slide",
+  "weak",
+  "diarrhea",
+  "constipation",
+  "shortfuse",
+  "longfuse",
+  "single",
+] as const;
 export type Curse = (typeof CURSES)[number];
 
 export const CURSE_NAME: Record<Curse, string> = {
   slow: "lento",
+  fast: "rápido demais",
+  reverse: "invertido",
+  slide: "sem freio",
   weak: "fogo fraco",
   diarrhea: "bombas sem parar",
+  constipation: "sem bomba",
+  shortfuse: "pavio curto",
+  longfuse: "pavio longo",
+  single: "uma bomba só",
 };
+
+/** O pavio das bombas de quem tem esta maldição (ou nenhuma). */
+export function bombFuse(curse: Curse | ""): number {
+  if (curse === "shortfuse") return BOMB_FUSE / 2;
+  if (curse === "longfuse") return BOMB_FUSE * 2;
+  return BOMB_FUSE;
+}
+
+/** Quantas bombas ao mesmo tempo, com a maldição: nenhuma, uma, ou as do jogador. */
+export function bombLimit(bombs: number, curse: Curse | ""): number {
+  if (curse === "constipation") return 0;
+  if (curse === "single") return 1;
+  return bombs;
+}
 
 /* ------------------------------------------------------------ jogadores */
 
@@ -177,6 +209,8 @@ export type PublicBomb = {
   y: number;
   owner: string;
   pierce: boolean;
+  /** O pavio dela, em ms: muda com as maldições de pavio. A tela escolhe o quadro por ele. */
+  fuse: number;
   /** Quem ainda está de pé em cima dela desde que nasceu, por `slot` (bit 1 << slot): para eles ela não fecha. */
   passers: number;
 };

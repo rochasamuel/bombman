@@ -23,10 +23,24 @@ export type Blocked = (cx: number, cy: number) => boolean;
 /** Quem anda: a posição (o centro, em células) e para onde olha. Muda no lugar. */
 export type Walker = { x: number; y: number; dir: Direction };
 
-/** A velocidade em células por segundo: a base, cada bota, e a maldição do lento. */
+/** A velocidade em células por segundo: a base, cada bota, e as maldições do lento e do rápido demais. */
 export function moveSpeed(level: number, curse: Curse | "" = ""): number {
   if (curse === "slow") return BASE_SPEED * 0.55;
+  if (curse === "fast") return BASE_SPEED * 2.2;
   return BASE_SPEED + level * SPEED_STEP;
+}
+
+/**
+ * A direção que vale com a maldição: o invertido troca os lados; o sem freio,
+ * sem dedo nenhum, segue para onde o boneco olha (até a parede o parar).
+ * O motor e a previsão da tela passam por aqui.
+ */
+export function cursedInput(curse: Curse | "", dx: number, dy: number, dir: Direction): { dx: number; dy: number } {
+  if (curse === "reverse") return { dx: -dx, dy: -dy };
+  if (curse === "slide" && dx === 0 && dy === 0) {
+    return { dx: dir === LEFT ? -1 : dir === RIGHT ? 1 : 0, dy: dir === UP ? -1 : dir === DOWN ? 1 : 0 };
+  }
+  return { dx, dy };
 }
 
 /**

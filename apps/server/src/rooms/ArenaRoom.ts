@@ -527,6 +527,7 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
       entry.y = bomb.y;
       entry.owner = bomb.owner;
       entry.pierce = bomb.pierce;
+      entry.fuse = bomb.fuse;
       entry.passers = this.passersMask(bomb.passers);
       state.bombs.push(entry);
     }

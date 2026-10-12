@@ -45,6 +45,8 @@ export class BombState extends Schema {
   @type("float32") y = 0;
   @type("string") owner = "";
   @type("boolean") pierce = false;
+  /** O pavio, em ms: a tela escolhe o quadro da bomba por ele. */
+  @type("uint16") fuse = 0;
   /** Quem ainda passa por ela, por `slot` (1 << slot): a previsão da tela precisa saber se ela fecha. */
   @type("uint8") passers = 0;
 }
