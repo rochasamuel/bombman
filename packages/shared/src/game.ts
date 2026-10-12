@@ -158,7 +158,8 @@ const MOVING_HOLD_MS = 4 * TICK_MS;
 /** Chance de um bloco destruído deixar um item. */
 const DROP_CHANCE = 0.38;
 /** Os pesos dos itens, na ordem de `POWERUPS`: fogo, bomba, bota, chute, perfurante, caveira, troca, invisível, controle remoto. Chute, perfurante, troca, invisível e controle remoto são raros. */
-const DROP_WEIGHTS = [36, 34, 20, 6, 4, 10, 4, 4, 4];
+// O controle remoto: 2,5 de 120,5 = ~2,1% dos itens, ~0,8% dos tijolos (com `DROP_CHANCE`).
+const DROP_WEIGHTS = [36, 34, 20, 6, 4, 10, 4, 4, 2.5];
 
 /**
  * Maior fatia de tempo que um passo da simulação aceita. Com a bota no máximo
