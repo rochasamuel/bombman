@@ -19,6 +19,7 @@ import type {
 import { LocalPlayer } from "./local";
 import { browserConfig } from "./netconfig";
 import { client } from "../lib/colyseus";
+import { createEmitter } from "../lib/emitter";
 import { takePendingRoom } from "../lib/pendingRoom";
 import {
   clearSession,
@@ -75,8 +76,8 @@ export type RoomConnection = {
 
 export function useRoomConnection(code: string): RoomConnection {
   const roomRef = useRef<Room | null>(null);
-  const fxHandlers = useRef(new Set<(events: FxEvent[]) => void>());
-  const emoteHandlers = useRef(new Set<(event: EmoteEvent) => void>());
+  const [fx] = useState(() => createEmitter<FxEvent[]>());
+  const [emotes] = useState(() => createEmitter<EmoteEvent>());
   const busy = useRef(false);
   const alive = useRef(true);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
@@ -98,7 +99,8 @@ export function useRoomConnection(code: string): RoomConnection {
       setDropped(false);
       setError("");
       let token = room.reconnectionToken;
-      saveSession(code, { reconnectionToken: token, playerName, seatKey });
+      const save = () => saveSession(code, { reconnectionToken: token, playerName, seatKey });
+      save();
 
       /*
        * O React só precisa saber do que muda a TELA em volta do canvas: fase,
@@ -123,7 +125,7 @@ export function useRoomConnection(code: string): RoomConnection {
         local.onState(room.state as unknown as ArenaState, performance.now());
         if (room.reconnectionToken !== token) {
           token = room.reconnectionToken;
-          saveSession(code, { reconnectionToken: token, playerName, seatKey });
+          save();
         }
         const snapshot = room.state.toJSON() as ArenaState;
         const next = [
@@ -148,12 +150,8 @@ export function useRoomConnection(code: string): RoomConnection {
         setState(snapshot);
       });
       room.onMessage("error", (message: ErrorMessage) => setNotice(message.message));
-      room.onMessage("fx", (events: FxMessage) => {
-        for (const handler of fxHandlers.current) handler(events);
-      });
-      room.onMessage("emote", (event: EmoteEvent) => {
-        for (const handler of emoteHandlers.current) handler(event);
-      });
+      room.onMessage("fx", (events: FxMessage) => fx.emit(events));
+      room.onMessage("emote", (event: EmoteEvent) => emotes.emit(event));
       room.onMessage("net", (stats: NetStatsMessage) => {
         local.setServerStats(stats);
       });
@@ -165,7 +163,7 @@ export function useRoomConnection(code: string): RoomConnection {
         local.setOnline(true);
         setDropped(false);
         token = room.reconnectionToken;
-        saveSession(code, { reconnectionToken: token, playerName, seatKey });
+        save();
       });
       room.onLeave(() => {
         local.setOnline(false);
@@ -173,7 +171,7 @@ export function useRoomConnection(code: string): RoomConnection {
         setStatus("lost");
       });
     },
-    [code, local],
+    [code, emotes, fx, local],
   );
 
   /* O ping nativo do Colyseus, uma vez por segundo, só com o diagnóstico aberto. */
@@ -318,18 +316,6 @@ export function useRoomConnection(code: string): RoomConnection {
     [],
   );
 
-  const onFx = useCallback((handler: (events: FxEvent[]) => void) => {
-    const handlers = fxHandlers.current;
-    handlers.add(handler);
-    return () => handlers.delete(handler);
-  }, []);
-
-  const onEmote = useCallback((handler: (event: EmoteEvent) => void) => {
-    const handlers = emoteHandlers.current;
-    handlers.add(handler);
-    return () => handlers.delete(handler);
-  }, []);
-
   return {
     status,
     dropped,
@@ -344,8 +330,8 @@ export function useRoomConnection(code: string): RoomConnection {
     retry,
     leave,
     actions,
-    onFx,
-    onEmote,
+    onFx: fx.on,
+    onEmote: emotes.on,
   };
 }
 

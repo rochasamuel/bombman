@@ -330,11 +330,16 @@ export class BombGame {
   }
 
   removePlayer(id: string) {
-    const player = this.players.find((p) => p.id === id);
+    const player = this.player(id);
     if (!player) return;
     this.players = this.players.filter((p) => p !== player);
     this.say(`${player.name} saiu.`);
     if (this.phase === "playing" || this.phase === "countdown") this.checkEnd();
+  }
+
+  /** O jogador desta sessão, se ele ainda estiver na arena. */
+  player(id: string): GamePlayer | undefined {
+    return this.players.find((p) => p.id === id);
   }
 
   seatOf(seatKey: string) {
@@ -414,7 +419,7 @@ export class BombGame {
   /* --------------------------------------------------------------- entrada */
 
   setInput(id: string, dx: number, dy: number) {
-    const player = this.players.find((p) => p.id === id);
+    const player = this.player(id);
     if (!player) return;
     player.input.dx = Math.sign(Number(dx) || 0);
     player.input.dy = Math.sign(Number(dy) || 0);
@@ -425,7 +430,7 @@ export class BombGame {
    * `decodeBatch`). Daqui em diante o jogador anda só por eles.
    */
   pushCommands(id: string, commands: readonly MoveCommand[]): number {
-    const player = this.players.find((p) => p.id === id);
+    const player = this.player(id);
     if (!player) return 0;
     player.driven = true;
     return player.queue.push(commands);
@@ -433,7 +438,7 @@ export class BombGame {
 
   /** Esquece os comandos na fila (quem caiu da rede): o boneco não segue andando sozinho. */
   dropCommands(id: string) {
-    const player = this.players.find((p) => p.id === id);
+    const player = this.player(id);
     if (!player) return;
     player.queue.discard();
     player.input.dx = 0;
@@ -447,7 +452,7 @@ export class BombGame {
    * aqui. Senão, vale a célula em que o boneco está.
    */
   requestBomb(id: string, at?: { cx: number; cy: number } | null) {
-    const player = this.players.find((p) => p.id === id);
+    const player = this.player(id);
     if (!player) return;
     player.wantsBomb = true;
     const ok = at && Number.isInteger(at.cx) && Number.isInteger(at.cy);
@@ -456,7 +461,7 @@ export class BombGame {
 
   /** Pede a detonação da remota mais antiga (o caminho sem comandos: o /mock). */
   requestDetonate(id: string) {
-    const player = this.players.find((p) => p.id === id);
+    const player = this.player(id);
     if (player) player.wantsDetonate = true;
   }
 
