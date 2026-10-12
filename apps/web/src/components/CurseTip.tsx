@@ -16,8 +16,12 @@ export function CurseTip({ me }: { me: PublicPlayer | undefined }) {
   ].filter(Boolean);
   const text = parts.join(" · ");
   return (
-    <p className={`bomb-curse-tip${text ? " is-on" : ""}`} role="status" title={text || undefined}>
-      {text}
-    </p>
+    <div className="bomb-curse-tip" role="status">
+      {text && (
+        <span className="bomb-curse-badge" title={text}>
+          {text}
+        </span>
+      )}
+    </div>
   );
 }

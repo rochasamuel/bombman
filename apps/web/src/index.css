@@ -461,27 +461,39 @@ body {
 .bomb-overlay > * {
   pointer-events: auto;
 }
-/* O aviso da maldição: a linha embaixo da arena, sempre do mesmo tamanho
-   (a arena se ajusta ao que sobra), o texto piscando em quadros quando há. */
+/* O aviso da maldição: uma badge embaixo da arena, piscando em quadros. A
+   linha fica sempre do mesmo tamanho (a arena se ajusta ao que sobra), vazia
+   sem maldição. */
 @keyframes bomb-curse-blink {
   50% {
-    color: var(--mark-hi);
+    color: var(--mark);
+    background: var(--slab);
+    box-shadow: var(--bevel);
   }
 }
 .bomb-curse-tip {
+  display: flex;
+  justify-content: center;
   width: 100%;
-  height: 16px;
+  height: 22px;
   margin: -4px 0;
+}
+.bomb-curse-badge {
+  max-width: 100%;
   overflow: hidden;
+  padding: 0 8px;
   font-size: 11px;
-  line-height: 16px;
-  text-align: center;
+  font-weight: 700;
+  line-height: 18px;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: var(--mark);
-}
-.bomb-curse-tip.is-on {
-  animation: bomb-curse-blink 1s steps(1, end) infinite;
+  color: var(--rim);
+  background: var(--mark);
+  border: 2px solid var(--rim);
+  box-shadow:
+    inset 2px 2px 0 var(--mark-hi),
+    inset -2px -2px 0 var(--mark-sh);
+  animation: bomb-curse-blink 0.8s steps(1, end) infinite;
 }
 .bomb-count {
   font-size: 64px;
@@ -587,7 +599,7 @@ body {
   .px-pop,
   .px-btn-urgent.px-pop,
   .bomb-timer.is-urgent,
-  .bomb-curse-tip {
+  .bomb-curse-badge {
     animation: none;
   }
 }
