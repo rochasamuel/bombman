@@ -29,7 +29,9 @@ a mais antiga, que pisca 300 ms em todas as telas e só então explode; o aviso
 cobre o ping de quase todo mundo, e ninguém morre de uma bomba que não viu
 piscar. Esquecida, ela explode sozinha em 10 s; morrer leva o controle, e as
 remotas que esperavam viram bombas comuns. Pavio curto, pavio longo e bombas
-sem parar ganham do controle enquanto duram). Quem perde as três vidas sai; a última
+sem parar ganham do controle enquanto duram). A perfurante e o controle
+remoto são tipos de bomba: vale o último que você pegou, e trocar o controle
+pela perfurante transforma as remotas que esperavam em bombas comuns. Quem perde as três vidas sai; a última
 pessoa de pé vence. Deu o tempo (3 minutos), vence quem tiver mais vidas.
 
 ## Arquitetura

@@ -668,8 +668,10 @@ export class BombGame {
       case "kick":
         player.kick = true;
         break;
+      // A perfurante e o controle remoto são tipos de bomba: vale o último que pegou.
       case "pierce":
         player.pierce = true;
+        this.dropRemote(player);
         break;
       case "skull":
         this.curse(player, CURSES[Math.floor(this.random() * CURSES.length)]);
@@ -682,6 +684,7 @@ export class BombGame {
         break;
       case "remote":
         player.remote = true;
+        player.pierce = false;
         break;
     }
   }
@@ -767,6 +770,21 @@ export class BombGame {
     });
     this.fx.push({ k: "place", by: player.id });
     return true;
+  }
+
+  /**
+   * Perdeu o controle remoto (morreu, ou trocou pela perfurante): sem quem as
+   * detone, as remotas que ainda esperam viram bombas comuns, com o pavio inteiro.
+   */
+  private dropRemote(player: GamePlayer) {
+    if (!player.remote) return;
+    player.remote = false;
+    for (const bomb of this.bombs) {
+      if (bomb.owner !== player.id || !bomb.remote || bomb.armed) continue;
+      bomb.remote = false;
+      bomb.fuse = BOMB_FUSE;
+      bomb.explodeAt = this.time + BOMB_FUSE;
+    }
   }
 
   /** O controle remoto: a remota mais antiga do jogador que ainda não pisca começa a piscar. */
@@ -887,16 +905,7 @@ export class BombGame {
     player.lives -= 1;
     player.curse = "";
     player.ghostUntil = 0;
-    // Sem dono vivo, a remota que ainda espera vira uma bomba comum, com o pavio inteiro.
-    if (player.remote) {
-      player.remote = false;
-      for (const bomb of this.bombs) {
-        if (bomb.owner !== player.id || !bomb.remote || bomb.armed) continue;
-        bomb.remote = false;
-        bomb.fuse = BOMB_FUSE;
-        bomb.explodeAt = this.time + BOMB_FUSE;
-      }
-    }
+    this.dropRemote(player);
     // A morte leva o chute e a perfurante; fogo, bombas e bota ficam.
     player.kick = false;
     player.pierce = false;

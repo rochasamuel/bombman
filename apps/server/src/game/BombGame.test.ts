@@ -863,6 +863,19 @@ describe("o controle remoto", () => {
     expect(game.bombs).not.toContain(bomb);
   });
 
+  it("perfurante e controle remoto: vale o último que pegou", () => {
+    const { game, p } = remote();
+    game.requestBomb(p.id);
+    game.tick(16);
+    const [waiting] = game.bombs;
+    game.apply(p, "pierce");
+    expect(p).toMatchObject({ pierce: true, remote: false });
+    // A remota que esperava, sem controle, vira comum com o pavio inteiro.
+    expect(waiting).toMatchObject({ remote: false, fuse: BOMB_FUSE });
+    game.apply(p, "remote");
+    expect(p).toMatchObject({ pierce: false, remote: true });
+  });
+
   it("as maldições do pavio e a diarreia ganham do controle remoto", () => {
     for (const curse of ["shortfuse", "longfuse", "diarrhea"] as const) {
       const { game, p } = remote();
