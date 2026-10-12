@@ -102,6 +102,8 @@ export type GamePlayer = {
   invulnerableUntil: number;
   curse: Curse | "";
   curseUntil: number;
+  /** De quem pegou a maldição: não a devolve a ele enquanto os dois se encostam. */
+  curseFrom: string;
   /** Até quando está invisível (o item), no relógio do motor. */
   ghostUntil: number;
   /** Tem o controle remoto (morrer leva). */
@@ -314,6 +316,7 @@ export class BombGame {
       invulnerableUntil: 0,
       curse: "",
       curseUntil: 0,
+      curseFrom: "",
       ghostUntil: 0,
       remote: false,
       wins: 0,
@@ -392,6 +395,7 @@ export class BombGame {
         invulnerableUntil: 0,
         curse: "",
         curseUntil: 0,
+        curseFrom: "",
         ghostUntil: 0,
         remote: false,
         input: { dx: 0, dy: 0 },
@@ -778,6 +782,7 @@ export class BombGame {
   curse(player: GamePlayer, kind: Curse) {
     player.curse = kind;
     player.curseUntil = this.time + CURSE_TIME;
+    player.curseFrom = "";
   }
 
   /** O item da troca: quem pegou e um adversário de pé, sorteado, trocam de lugar. Sem ninguém, nada. */
@@ -797,17 +802,30 @@ export class BombGame {
     this.pickUp(player);
   }
 
-  /** O contágio: quem encosta num amaldiçoado pega a mesma maldição, pelo tempo inteiro. */
+  /**
+   * O contágio: o amaldiçoado que encosta em alguém sem maldição passa a dele,
+   * pelo tempo inteiro, e fica curado. Quem pegou só a devolve a quem passou
+   * depois que os dois se desgrudam.
+   */
   private spread() {
-    const sick = this.players.filter((p) => p.alive && p.curse);
-    for (const from of sick) {
-      for (const to of this.players) {
-        if (to === from || !to.alive || to.curse === from.curse) continue;
-        if (Math.abs(to.x - from.x) >= CONTACT || Math.abs(to.y - from.y) >= CONTACT) continue;
-        to.curse = from.curse;
-        to.curseUntil = this.time + CURSE_TIME;
-        this.say(`${from.name} passou a maldição para ${to.name}.`);
-      }
+    const near = (a: GamePlayer, b: GamePlayer) =>
+      Math.abs(a.x - b.x) < CONTACT && Math.abs(a.y - b.y) < CONTACT;
+    for (const player of this.players) {
+      const giver = player.curseFrom && this.players.find((p) => p.id === player.curseFrom);
+      if (!giver || !giver.alive || !near(player, giver)) player.curseFrom = "";
+    }
+    for (const from of this.players) {
+      if (!from.alive || !from.curse) continue;
+      const to = this.players.find(
+        (p) => p !== from && p.alive && !p.curse && p.id !== from.curseFrom && near(p, from),
+      );
+      if (!to) continue;
+      to.curse = from.curse;
+      to.curseUntil = this.time + CURSE_TIME;
+      to.curseFrom = from.id;
+      from.curse = "";
+      from.curseFrom = "";
+      this.say(`${from.name} passou a maldição para ${to.name}.`);
     }
   }
 
@@ -987,6 +1005,7 @@ export class BombGame {
     player.queue.discard();
     player.lives -= 1;
     player.curse = "";
+    player.curseFrom = "";
     player.ghostUntil = 0;
     this.dropRemote(player);
     // A morte leva o chute e a perfurante; fogo, bombas e bota ficam.

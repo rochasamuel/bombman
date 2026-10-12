@@ -728,7 +728,7 @@ describe("as maldições", () => {
 });
 
 describe("o contágio", () => {
-  it("toda maldição passa a quem encostar, pelo tempo inteiro", () => {
+  it("a maldição passa a quem encostar, pelo tempo inteiro, e quem passou fica curado", () => {
     const game = open();
     const [a, b] = game.players;
     game.curse(a, "reverse");
@@ -737,12 +737,39 @@ describe("o contágio", () => {
     b.y = a.y;
     game.tick(16);
     expect(b.curse).toBe("reverse");
-    // Separados (encostados, um devolveria ao outro quando a dele acabasse).
-    b.x = COLS - 2.5;
-    // O que pegou agora tem os 15 s inteiros; quem passou, só o que sobrava.
-    run(game, CURSE_TIME - 2000);
+    expect(a.curse).toBe("");
+    // Ainda encostados, não volta.
+    run(game, 1000);
     expect(a.curse).toBe("");
     expect(b.curse).toBe("reverse");
+    // O que pegou tem os 15 s inteiros.
+    b.x = COLS - 2.5;
+    run(game, CURSE_TIME - 2000);
+    expect(b.curse).toBe("reverse");
+  });
+
+  it("desgrudados, quem pegou pode devolver; em quem já tem maldição não pega", () => {
+    const game = open();
+    const [a, b] = game.players;
+    game.curse(a, "reverse");
+    b.x = a.x + 0.5;
+    b.y = a.y;
+    game.tick(16);
+    expect(b.curse).toBe("reverse");
+    b.x = COLS - 2.5;
+    game.tick(16);
+    b.x = a.x + 0.5;
+    game.tick(16);
+    expect(a.curse).toBe("reverse");
+    expect(b.curse).toBe("");
+
+    game.curse(b, "slow");
+    b.x = COLS - 2.5;
+    game.tick(16);
+    b.x = a.x + 0.5;
+    game.tick(16);
+    expect(a.curse).toBe("reverse");
+    expect(b.curse).toBe("slow");
   });
 
   it("de longe não pega, e morrer cura", () => {

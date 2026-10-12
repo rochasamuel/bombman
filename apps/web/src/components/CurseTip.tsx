@@ -11,7 +11,7 @@ export function CurseTip({ me }: { me: PublicPlayer | undefined }) {
   const curse = (me?.alive ? me.curse : "") as Curse | "";
   const ghost = !!me?.alive && me.ghost;
   const parts = [
-    curse && `💀 ${CURSE_NAME[curse]}: ${CURSE_HINT[curse]} (pega em quem encostar)`,
+    curse && `💀 ${CURSE_NAME[curse]}: ${CURSE_HINT[curse]} (encoste em alguém para passar)`,
     ghost && "👻 invisível: os outros quase não te veem",
   ].filter(Boolean);
   const text = parts.join(" · ");
