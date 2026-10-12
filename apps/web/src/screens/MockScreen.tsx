@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BombGame,
+  CURSES,
+  CURSE_NAME,
+  CURSE_TIME,
   DEFAULT_ARENA,
   GameError,
   ARENA_SIZE_NAME,
@@ -15,6 +18,7 @@ import {
   themeById,
   type ArenaDefinition,
   type ArenaState,
+  type Curse,
   type EmoteEvent,
   type FxEvent,
   type GamePlayer,
@@ -39,7 +43,8 @@ import type { RoomActions } from "../game/useRoomConnection";
  * escolha da sala de verdade. A escolha vai para a URL
  * (`/mock?arena=small&theme=volcano`), para o F5 voltar a ela; uma planta na
  * URL (`?arena=small-maze`) joga só ela, para olhar uma planta de perto.
- * "Sair" da arena volta para a escolha.
+ * "Sair" da arena volta para a escolha. No canto, um painel joga cada
+ * maldição da caveira no vermelho, para testar sem caçar caveira.
  */
 export function MockScreen({ arena = "", theme = "" }: { arena?: string; theme?: string }) {
   // `?arena=` aceita um tamanho (sorteio) ou uma planta (fixa, para olhar de perto).
@@ -190,16 +195,60 @@ function MockMatch({
     return () => handlers.delete(handler);
   }, []);
 
+  const curse = state.players.find((p) => p.id === ME)?.curse ?? "";
+  const lay = (next: Curse | "") => {
+    const me = game.players.find((p) => p.id === ME);
+    if (!me) return;
+    me.curse = next;
+    me.curseUntil = next ? game.time + CURSE_TIME : 0;
+  };
+
   return (
-    <Arena
-      state={state}
-      live={live}
-      sessionId={ME}
-      actions={actions}
-      onFx={onFx}
-      onEmote={onEmote}
-      onExit={onExit}
-    />
+    <>
+      <Arena
+        state={state}
+        live={live}
+        sessionId={ME}
+        actions={actions}
+        onFx={onFx}
+        onEmote={onEmote}
+        onExit={onExit}
+      />
+      <CursePanel active={curse} onLay={lay} />
+    </>
+  );
+}
+
+/**
+ * As maldições à mão: cada botão amaldiçoa o vermelho por `CURSE_TIME`, como
+ * a caveira faria. O botão solta o foco ao clicar: senão o espaço (a bomba)
+ * apertaria o botão de novo.
+ */
+function CursePanel({ active, onLay }: { active: Curse | ""; onLay: (curse: Curse | "") => void }) {
+  const press = (event: React.MouseEvent<HTMLButtonElement>, curse: Curse | "") => {
+    event.currentTarget.blur();
+    onLay(curse);
+  };
+  return (
+    <details className="px-slab" style={{ position: "fixed", right: 8, bottom: 8, zIndex: 40, padding: "6px 10px" }}>
+      <summary className="px-label cursor-pointer">💀 maldições</summary>
+      <div className="mt-2 flex max-w-[260px] flex-wrap gap-x-3 gap-y-1">
+        {CURSES.map((curse) => (
+          <button
+            key={curse}
+            type="button"
+            className="px-link text-sm"
+            style={{ color: active === curse ? "var(--mark)" : undefined }}
+            onClick={(event) => press(event, curse)}
+          >
+            {CURSE_NAME[curse]}
+          </button>
+        ))}
+        <button type="button" className="px-link text-sm" disabled={!active} onClick={(event) => press(event, "")}>
+          limpar
+        </button>
+      </div>
+    </details>
   );
 }
 
@@ -247,7 +296,7 @@ function snapshot(game: BombGame, themeId: string): ArenaState {
     matchMinutes: game.matchMinutes,
     players: game.players.map((player) => publicPlayer(game, player)),
     grid: game.grid,
-    bombs: game.bombs.map(({ id, cx, cy, x, y, owner, pierce, passers }) => ({
+    bombs: game.bombs.map(({ id, cx, cy, x, y, owner, pierce, fuse, passers }) => ({
       id,
       cx,
       cy,
@@ -255,6 +304,7 @@ function snapshot(game: BombGame, themeId: string): ArenaState {
       y,
       owner,
       pierce,
+      fuse,
       passers: game.players.reduce((mask, p) => (passers.has(p.id) ? mask | (1 << p.slot) : mask), 0),
     })),
     flames: game.flames.map(({ cx, cy, kind, born }) => ({ cx, cy, kind, born })),
