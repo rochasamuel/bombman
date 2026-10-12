@@ -9,6 +9,7 @@ import {
   FLAME_END_R,
   FLAME_END_U,
   FLAME_H,
+  HURRY_DROP_MS,
   LEFT,
   RIGHT,
   TICK_MS,
@@ -16,8 +17,11 @@ import {
   UP,
   WALL,
   REMOTE_ARM_MS,
+  arenaById,
   bombFuse,
   cellIndex,
+  hurryOrder,
+  type GridPosition,
   type ArenaState,
   type PublicPlayer,
 } from "@bomb/shared";
@@ -113,6 +117,10 @@ export class ArenaRenderer {
   /** O rastro de cada bomba, por id: chutada, ela anda e é interpolada como os bonecos. */
   private bombTrails = new Map<string, Sample[]>();
   private flameSeen = new Map<string, number>();
+  /** A espiral do aperto da planta em jogo (ver `hurryOrder`), refeita só quando a planta muda. */
+  private hurryCells: { arenaId: string; cells: GridPosition[] } = { arenaId: "", cells: [] };
+  /** Quando a tela viu o bloco de número `hurry` começar a cair. */
+  private dropSeen = { hurry: 0, at: 0 };
   private scale = 1;
   private dpr = 1;
   private cols = 0;
@@ -217,11 +225,35 @@ export class ArenaRenderer {
     this.layBombs(layer, state, now, stamp);
     this.layPlayers(layer, ctx, state, now, stamp);
     layer.sort((a, b) => a.y - b.y || a.rank - b.rank);
+    const fall = this.falling(state, now);
+    if (fall) drawDropShadow(ctx, fall);
     for (const entry of layer) entry.draw(ctx);
+    // O bloco no ar está acima de tudo o que pisa na arena.
+    if (fall) this.drawBlock(ctx, art.pillar(theme.id), fall.cx * TILE, fall.cy * TILE - fallHeight(fall));
     // A muralha de baixo é a mais perto de quem olha: ela e os ornamentos
     // dela sobem por cima da última fileira (as ameias de neve, os merlões),
     // e ficam na frente de tudo o que pisa nela.
     this.drawBottomWall(ctx, cols, rows, theme);
+  }
+
+  /**
+   * O bloco do aperto que está caindo agora, e quanto da queda já foi (0 a 1).
+   * O servidor só diz quantos já caíram; o próximo da espiral é o que está no
+   * ar, e a queda dura o intervalo entre dois blocos, contada de quando a
+   * tela viu o número mudar — ele assenta junto com o patch que o põe na grade.
+   */
+  private falling(state: ArenaState, now: number): { cx: number; cy: number; p: number } | null {
+    if (state.phase !== "playing" || state.hurry === 0) return null;
+    if (this.hurryCells.arenaId !== state.arenaId) {
+      const arena = arenaById(state.arenaId);
+      this.hurryCells = { arenaId: state.arenaId, cells: arena ? hurryOrder(arena) : [] };
+    }
+    const cell = this.hurryCells.cells[state.hurry - 1];
+    if (!cell) return null;
+    const [cx, cy] = cell;
+    if (state.grid[cellIndex(cx, cy, state.cols)] === WALL) return null;
+    if (this.dropSeen.hurry !== state.hurry) this.dropSeen = { hurry: state.hurry, at: now };
+    return { cx, cy, p: Math.min(1, (now - this.dropSeen.at) / HURRY_DROP_MS) };
   }
 
   /* ------------------------------------------------------------ a grade */
@@ -614,6 +646,23 @@ export class ArenaRenderer {
 }
 
 /** Esquece o que não está mais na arena, para o mapa não crescer a rodada inteira. */
+/** Quanto acima da célula o bloco que cai está: sai de fora da tela e acelera, como em queda livre. */
+function fallHeight(fall: { cy: number; p: number }): number {
+  const top = (fall.cy + 2) * TILE + MARGIN;
+  return Math.round(top * (1 - fall.p * fall.p));
+}
+
+/** A sombra do bloco que cai: cresce e escurece no chão da célula conforme ele chega. */
+function drawDropShadow(ctx: CanvasRenderingContext2D, fall: { cx: number; cy: number; p: number }) {
+  const r = (TILE / 2 - 1) * (0.35 + 0.65 * fall.p);
+  ctx.save();
+  ctx.fillStyle = `rgba(0, 0, 0, ${0.15 + 0.3 * fall.p})`;
+  ctx.beginPath();
+  ctx.ellipse((fall.cx + 0.5) * TILE, (fall.cy + 0.5) * TILE + 2, r, r * 0.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 function forget(seen: Map<string, unknown>, alive: Set<string>) {
   for (const key of seen.keys()) if (!alive.has(key)) seen.delete(key);
 }

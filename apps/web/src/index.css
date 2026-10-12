@@ -501,6 +501,19 @@ body {
   color: var(--mark);
   text-shadow: 4px 4px 0 var(--rim);
 }
+/* O "HURRY UP!": o mesmo número do "3, 2, 1", menor para caber na pequena, piscando em quadros. */
+@keyframes bomb-hurry-blink {
+  50% {
+    color: var(--paper);
+  }
+}
+.bomb-hurry.px-pop {
+  font-size: clamp(28px, 7vw, 56px);
+  white-space: nowrap;
+  animation:
+    px-pop 0.18s steps(3, end),
+    bomb-hurry-blink 0.3s steps(1, end) infinite;
+}
 
 /* ---- a escolha da arena -------------------------------------------------- */
 

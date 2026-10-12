@@ -1,4 +1,5 @@
 import { ARENA_SIZES, ARENA_SIZE_DIMS, defineArena, emptyLayout, type ArenaDefinition, type ArenaSize } from "./arena.js";
+import { HURRY_TIME } from "./contract.js";
 
 /*
  * As nove arenas: três tamanhos, três desenhos em cada um. Cada planta foi
@@ -295,6 +296,9 @@ export const EMPTY_ARENA = defineArena(
 
 export const arenaById = (id: unknown): ArenaDefinition | undefined =>
   typeof id === "string" ? ARENAS.find((arena) => arena.id === id) : undefined;
+
+/** Quanto falta quando o aperto começa na arena de `id` (a padrão, se desconhecida). */
+export const hurryTimeOf = (id: unknown): number => HURRY_TIME[(arenaById(id) ?? DEFAULT_ARENA).size];
 
 export const arenasOfSize = (size: ArenaSize): ArenaDefinition[] =>
   ARENAS.filter((arena) => arena.size === size);

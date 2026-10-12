@@ -81,6 +81,7 @@ function snapshot(game: BombGame, tick: number): ArenaState {
     timeLeft: game.timeLeft,
     tick,
     countdown: 0,
+    hurry: 0,
     winnerId: "",
     round: game.round,
     log: [],

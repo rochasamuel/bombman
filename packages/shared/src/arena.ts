@@ -115,6 +115,29 @@ export function fillGrid(grid: number[], arena: ArenaDefinition): number[] {
   return grid;
 }
 
+/**
+ * A ordem em que os blocos do aperto caem: em espiral, anel a anel, da borda
+ * para o meio, no sentido do relógio a partir do canto de cima à esquerda, até
+ * a última célula. O pilar já é bloco e fica de fora. Depende só da planta: a
+ * tela calcula a mesma lista.
+ */
+export function hurryOrder(arena: ArenaDefinition): GridPosition[] {
+  const order: GridPosition[] = [];
+  let [x0, y0, x1, y1] = [1, 1, arena.cols - 2, arena.rows - 2];
+  const push = (cx: number, cy: number) => {
+    if (CELL_OF[arena.layout[cy][cx]] !== WALL) order.push([cx, cy]);
+  };
+  while (x0 <= x1 && y0 <= y1) {
+    for (let cx = x0; cx <= x1; cx++) push(cx, y0);
+    for (let cy = y0 + 1; cy <= y1; cy++) push(x1, cy);
+    // O anel de uma fileira ou coluna só já acabou nas duas voltas acima.
+    if (y1 > y0) for (let cx = x1 - 1; cx >= x0; cx--) push(cx, y1);
+    if (x1 > x0) for (let cy = y1 - 1; cy > y0; cy--) push(x0, cy);
+    [x0, y0, x1, y1] = [x0 + 1, y0 + 1, x1 - 1, y1 - 1];
+  }
+  return order;
+}
+
 /** Só a muralha, tudo livre por dentro, os quatro nos cantos: a arena limpa em que a regra se testa. */
 export function emptyLayout(cols: number, rows: number): string[] {
   const rows_ = Array.from({ length: rows }, (_, cy) =>

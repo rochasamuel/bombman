@@ -22,6 +22,8 @@ import {
   FLAME_TIME,
   FLAME_V,
   FLOOR,
+  HURRY_DROP_MS,
+  HURRY_TIME,
   INVULNERABLE_TIME,
   KICK_SPEED,
   LEFT,
@@ -50,7 +52,7 @@ import {
   type GamePhase,
   type Powerup,
 } from "./contract.js";
-import { ARENA_SIZE_NAME, fillGrid, type ArenaDefinition } from "./arena.js";
+import { ARENA_SIZE_NAME, fillGrid, hurryOrder, type ArenaDefinition, type GridPosition } from "./arena.js";
 import { cursedInput, moveOnRails, moveSpeed } from "./move.js";
 import { DEFAULT_INPUT_LIMITS, InputQueue, TICK_MS, cellBlocked, type InputQueueLimits, type MoveCommand } from "./net.js";
 import { DEFAULT_ARENA } from "./arenas.js";
@@ -200,6 +202,12 @@ export class BombGame {
   /** Quanto dura a próxima rodada, em minutos. Só muda no lobby ou depois do fim (`setMatchMinutes`). */
   matchMinutes: MatchMinutes = DEFAULT_MATCH_MINUTES;
   countdownUntil = 0;
+  /** O aperto: zero antes dele; depois, 1 + quantos blocos já caíram (ver `HURRY_TIME`). */
+  hurry = 0;
+  /** Quando cai o próximo bloco do aperto, no relógio do motor. */
+  private nextDropAt = 0;
+  /** As células do aperto, na ordem da espiral, da planta desta rodada. */
+  private hurryCells: GridPosition[] = [];
   winnerId = "";
   round = 0;
   log: string[] = [];
@@ -361,6 +369,8 @@ export class BombGame {
     this.flames = [];
     this.powerups = [];
     this.timeLeft = this.matchMinutes * 60_000;
+    this.hurry = 0;
+    this.hurryCells = hurryOrder(this.arena);
     this.buildGrid();
     for (const player of this.players) {
       this.seat(player);
@@ -493,6 +503,7 @@ export class BombGame {
 
     this.timeLeft = Math.max(0, this.timeLeft - dt);
     const seconds = dt / 1000;
+    this.tickHurry();
 
     for (const player of this.players) {
       this.tickPlayer(player, seconds, dt);
@@ -502,6 +513,72 @@ export class BombGame {
     this.tickFlames();
     this.tickDeaths();
     this.checkEnd();
+  }
+
+  /* --------------------------------------------------------------- o aperto */
+
+  private tickHurry() {
+    if (this.hurry === 0) {
+      if (this.timeLeft > HURRY_TIME[this.arena.size]) return;
+      this.hurry = 1;
+      this.nextDropAt = this.time + HURRY_DROP_MS;
+      this.fx.push({ k: "hurry" });
+      this.say("Hurry up! Os blocos estão caindo.");
+    }
+    while (this.hurry - 1 < this.hurryCells.length && this.time >= this.nextDropAt) {
+      const [cx, cy] = this.hurryCells[this.hurry - 1];
+      this.crush(cx, cy);
+      this.hurry += 1;
+      this.nextDropAt += HURRY_DROP_MS;
+    }
+  }
+
+  /**
+   * Um bloco do aperto cai na célula: vira bloco rígido e leva o que houver
+   * nela — tijolo, item, chama e bomba (que some sem explodir). Quem está de
+   * pé ali é esmagado, mesmo piscando de quem acabou de renascer.
+   */
+  private crush(cx: number, cy: number) {
+    this.grid[this.index(cx, cy)] = WALL;
+    this.bombs = this.bombs.filter((b) => b.cx !== cx || b.cy !== cy);
+    this.flames = this.flames.filter((f) => f.cx !== cx || f.cy !== cy);
+    this.powerups = this.powerups.filter((p) => p.cx !== cx || p.cy !== cy);
+    this.fx.push({ k: "crush", cx, cy });
+    for (const player of this.players) {
+      if (player.alive && Math.floor(player.x) === cx && Math.floor(player.y) === cy) {
+        this.kill(player, "foi esmagado");
+      }
+    }
+  }
+
+  /**
+   * Onde renascer: o canto, se ainda está aberto; senão o chão livre mais
+   * perto dele, de preferência fora dos próximos blocos a cair. Com a arena
+   * toda fechada, lugar nenhum.
+   */
+  private respawnCell(player: GamePlayer): GridPosition | null {
+    const [sx, sy] = this.arena.spawns[player.slot];
+    const soon = new Set(
+      this.hurry ? this.hurryCells.slice(this.hurry - 1, this.hurry + 9).map(([cx, cy]) => this.index(cx, cy)) : [],
+    );
+    for (const avoid of [soon, new Set<number>()]) {
+      const open = (cx: number, cy: number) =>
+        this.grid[this.index(cx, cy)] === FLOOR && !avoid.has(this.index(cx, cy)) && !this.bombAt(cx, cy);
+      if (open(sx, sy)) return [sx, sy];
+      let best: GridPosition | null = null;
+      let bestDistance = Infinity;
+      for (let cy = 1; cy < this.rows - 1; cy++) {
+        for (let cx = 1; cx < this.cols - 1; cx++) {
+          const distance = Math.abs(cx - sx) + Math.abs(cy - sy);
+          if (distance < bestDistance && open(cx, cy)) {
+            best = [cx, cy];
+            bestDistance = distance;
+          }
+        }
+      }
+      if (best) return best;
+    }
+    return null;
   }
 
   private tickPlayer(player: GamePlayer, seconds: number, dt: number) {
@@ -898,7 +975,7 @@ export class BombGame {
     }
   }
 
-  private kill(player: GamePlayer) {
+  private kill(player: GamePlayer, how = "explodiu") {
     player.alive = false;
     player.moving = false;
     player.movingUntil = 0;
@@ -915,14 +992,24 @@ export class BombGame {
     this.fx.push({ k: "die", who: player.id });
     this.say(
       player.lives > 0
-        ? `${player.name} explodiu. Restam ${player.lives}.`
+        ? `${player.name} ${how}. Restam ${player.lives}.`
         : `${player.name} está fora.`,
     );
   }
 
   private respawn(player: GamePlayer) {
-    const [sx, sy] = this.arena.spawns[player.slot];
+    const cell = this.respawnCell(player);
+    if (!cell) {
+      // A arena fechou inteira: não há onde voltar, e as vidas que sobravam se perdem.
+      player.lives = 0;
+      player.respawnAt = 0;
+      this.say(`${player.name} está fora: a arena fechou.`);
+      return;
+    }
+    const [sx, sy] = cell;
     this.seat(player);
+    player.x = sx + 0.5;
+    player.y = sy + 0.5;
     player.alive = true;
     player.respawnAt = 0;
     player.invulnerableUntil = this.time + INVULNERABLE_TIME;
@@ -954,7 +1041,8 @@ export class BombGame {
       this.finish(standing[0]);
       return;
     }
-    if (this.timeLeft <= 0) {
+    // Com o aperto valendo, o relógio não acaba a rodada: os blocos acabam.
+    if (this.timeLeft <= 0 && this.hurry === 0) {
       const most = Math.max(...standing.map((p) => p.lives));
       const top = standing.filter((p) => p.lives === most);
       this.finish(top.length === 1 ? top[0] : undefined, "Deu o tempo.");

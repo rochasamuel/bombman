@@ -53,6 +53,16 @@ export const MATCH_TIME = DEFAULT_MATCH_MINUTES * 60_000;
 /** Os três segundos de "3, 2, 1" entre o host apertar e a arena abrir. */
 export const COUNTDOWN = 3000;
 
+/**
+ * O aperto ("HURRY UP!"): faltando `HURRY_TIME` do tamanho da arena, blocos
+ * rígidos começam a cair do céu, um a cada `HURRY_DROP_MS`, em espiral da
+ * borda para o meio (ver `hurryOrder`), até fechar a arena inteira. Daí em
+ * diante o relógio não acaba mais a rodada: ela termina quando sobra um (ou
+ * ninguém, empate).
+ */
+export const HURRY_TIME: Record<ArenaSize, number> = { small: 10_000, medium: 20_000, large: 45_000 };
+export const HURRY_DROP_MS = 350;
+
 /** O pavio: quanto a bomba espera antes de explodir, em ms. */
 export const BOMB_FUSE = 2500;
 
@@ -298,6 +308,8 @@ export type ArenaState = {
   tick: number;
   /** O "3, 2, 1". Zero fora da contagem. */
   countdown: number;
+  /** O aperto: zero antes dele; depois, 1 + quantos blocos já caíram (o próximo a cair é `hurryOrder(arena)[hurry - 1]`). */
+  hurry: number;
   /** Quem venceu a rodada; vazio no empate ou antes do fim. */
   winnerId: string;
   round: number;
@@ -368,6 +380,8 @@ export type FxEvent =
   | { k: "die"; who: string }
   | { k: "pickup"; who: string; kind: Powerup }
   | { k: "start" }
+  | { k: "hurry" }
+  | { k: "crush"; cx: number; cy: number }
   | { k: "finish"; winner: string };
 export type FxMessage = FxEvent[];
 export type EmoteEvent = { by: string; emote: Emote };

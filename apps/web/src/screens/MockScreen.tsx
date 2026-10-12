@@ -4,6 +4,7 @@ import {
   CURSES,
   CURSE_NAME,
   POWERUP_NAME,
+  HURRY_TIME,
   DEFAULT_ARENA,
   GameError,
   ARENA_SIZE_NAME,
@@ -119,6 +120,8 @@ function MockMatch({
   const first = useMemo(() => snapshot(game, themeId), [game, themeId]);
   /** O retrato vivo, refeito a cada quadro: o canvas lê daqui, sem render. */
   const liveRef = useRef<ArenaState>(first);
+  /** O botão do aperto: "jump" pula o relógio para pouco antes dele; "run", daí em diante ele corre de verdade. */
+  const hurryRef = useRef<"" | "jump" | "run">("");
   const [state, setState] = useState(first);
   const fxHandlers = useRef(new Set<(events: FxEvent[]) => void>());
   const emoteHandlers = useRef(new Set<(event: EmoteEvent) => void>());
@@ -139,7 +142,11 @@ function MockMatch({
       game.tick(dt);
       // O relógio da rodada fica congelado: o /mock é para olhar, não para
       // acabar por tempo. Bombas, chamas e mortes seguem o relógio normal.
-      game.timeLeft = game.matchMinutes * 60_000;
+      if (hurryRef.current === "jump" && game.phase === "playing") {
+        game.timeLeft = Math.min(game.timeLeft, HURRY_TIME[game.arena.size] + 1500);
+        hurryRef.current = "run";
+      }
+      if (!hurryRef.current) game.timeLeft = game.matchMinutes * 60_000;
       const next = snapshot(game, themeRef.current);
       liveRef.current = next;
       const key = signatureOf(next);
@@ -177,6 +184,7 @@ function MockMatch({
       },
       restart: () =>
         quietly(() => {
+          hurryRef.current = "";
           game.setArena(draw());
           game.start();
         }),
@@ -209,6 +217,11 @@ function MockMatch({
     if (player) game.apply(player, kind);
   };
 
+  // O aperto já: o relógio pula para um pouco antes dele e passa a correr.
+  const hurry = () => {
+    if (!hurryRef.current) hurryRef.current = "jump";
+  };
+
   return (
     <>
       <Arena
@@ -220,7 +233,7 @@ function MockMatch({
         onEmote={onEmote}
         onExit={onExit}
       />
-      <CursePanel active={curse} onLay={lay} onGive={give} />
+      <CursePanel active={curse} onLay={lay} onGive={give} onHurry={hurry} />
     </>
   );
 }
@@ -235,10 +248,12 @@ function CursePanel({
   active,
   onLay,
   onGive,
+  onHurry,
 }: {
   active: Curse | "";
   onLay: (curse: Curse | "") => void;
   onGive: (kind: "swap" | "ghost" | "remote") => void;
+  onHurry: () => void;
 }) {
   const press = (event: React.MouseEvent<HTMLButtonElement>, curse: Curse | "") => {
     event.currentTarget.blur();
@@ -278,6 +293,19 @@ function CursePanel({
             {POWERUP_NAME[kind]}
           </button>
         ))}
+      </div>
+      <div className="mt-2 flex gap-x-3">
+        <span className="px-label">relógio</span>
+        <button
+          type="button"
+          className="px-link text-sm"
+          onClick={(event) => {
+            event.currentTarget.blur();
+            onHurry();
+          }}
+        >
+          hurry up
+        </button>
       </div>
     </details>
   );
@@ -346,6 +374,7 @@ function snapshot(game: BombGame, themeId: string): ArenaState {
     // O /mock não tem relógio de servidor: a interpolação usa a hora da tela (ver `render.ts`).
     tick: 0,
     countdown: game.countdown,
+    hurry: game.hurry,
     winnerId: game.winnerId,
     round: game.round,
     log: game.log,

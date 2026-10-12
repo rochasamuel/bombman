@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { SLOT_COLORS, type ArenaState, type FxEvent } from "@bomb/shared";
+import { SLOT_COLORS, hurryTimeOf, type ArenaState, type FxEvent } from "@bomb/shared";
 import { checkSprites } from "../art/atlas";
 import { ArenaRenderer, fitScale, viewOf } from "../game/render";
 import { useEmotes } from "../game/useEmotes";
@@ -14,6 +14,9 @@ import { EmotePicker } from "./EmotePicker";
 import { Hud } from "./Hud";
 import { NetOverlay } from "./NetOverlay";
 import { TouchPad } from "./TouchPad";
+
+/** Quantos segundos o "HURRY UP!" fica no meio da arena. */
+const HURRY_BANNER_S = 3;
 
 type Props = {
   /** O retrato por patch, para o painel. */
@@ -149,6 +152,8 @@ export function Arena({ state, live, local, setDiag, sessionId, actions, onFx, o
         else if (event.k === "pickup") playSound("pickup");
         else if (event.k === "die") playSound("die");
         else if (event.k === "start") playSound("go");
+        else if (event.k === "hurry") playSound("hurry");
+        else if (event.k === "crush") playSound("crush", 0.3);
         else if (event.k === "finish" && event.winner === sessionId) playSound("victory");
       }
     });
@@ -157,6 +162,11 @@ export function Arena({ state, live, local, setDiag, sessionId, actions, onFx, o
   useEffect(() => {
     if (state.phase === "countdown" && state.countdown > 0) playSound("tick");
   }, [state.phase, state.countdown]);
+
+  // O aviso do aperto: os primeiros segundos dele, no meio da arena, como o "3, 2, 1".
+  const seconds = Math.ceil(state.timeLeft / 1000);
+  const hurryAt = hurryTimeOf(state.arenaId) / 1000;
+  const hurrying = state.phase === "playing" && seconds <= hurryAt && seconds > hurryAt - HURRY_BANNER_S;
 
   const isHost = state.hostId === sessionId;
   const winner = state.players.find((p) => p.id === state.winnerId);
@@ -193,6 +203,12 @@ export function Arena({ state, live, local, setDiag, sessionId, actions, onFx, o
             <span key={state.countdown} className="bomb-count px-pop">
               {state.countdown}
             </span>
+          </div>
+        )}
+
+        {hurrying && (
+          <div className="bomb-overlay">
+            <span className="bomb-count bomb-hurry px-pop">HURRY UP!</span>
           </div>
         )}
 

@@ -413,6 +413,7 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
     // uma mudança mesmo com todo mundo parado — 30 mensagens por segundo à toa.
     state.timeLeft = Math.ceil(game.timeLeft / 1000) * 1000;
     state.countdown = game.countdown;
+    state.hurry = game.hurry;
     state.winnerId = game.winnerId;
     state.round = game.round;
     state.arenaId = game.arena.id;

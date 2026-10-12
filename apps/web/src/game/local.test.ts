@@ -35,6 +35,7 @@ function playing(): ArenaState {
     timeLeft: 0,
     tick: 0,
     countdown: 0,
+    hurry: 0,
     winnerId: "",
     round: 1,
     log: [],

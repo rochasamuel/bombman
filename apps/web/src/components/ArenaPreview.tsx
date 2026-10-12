@@ -101,6 +101,7 @@ function stillLife(arena: ArenaDefinition, themeId: string): ArenaState {
     powerups: [],
     timeLeft: MATCH_TIME,
     countdown: 0,
+    hurry: 0,
     winnerId: "",
     round: 0,
     log: [],

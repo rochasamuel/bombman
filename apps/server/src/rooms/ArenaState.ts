@@ -93,6 +93,8 @@ export class ArenaRoomState extends Schema {
   /** O passo do motor da última vez que uma posição mudou: o carimbo da interpolação na tela. */
   @type("uint32") tick = 0;
   @type("uint8") countdown = 0;
+  /** O aperto: zero antes dele; depois, 1 + quantos blocos já caíram. */
+  @type("uint16") hurry = 0;
   @type("string") winnerId = "";
   @type("uint8") round = 0;
   @type(["string"]) log = new ArraySchema<string>();

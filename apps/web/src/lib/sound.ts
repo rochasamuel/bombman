@@ -14,7 +14,9 @@ export type SoundName =
   | "pickup"
   | "die"
   | "tick"
-  | "go";
+  | "go"
+  | "hurry"
+  | "crush";
 
 export const VOLUME = 0.5;
 
@@ -89,6 +91,15 @@ const synth: Partial<Record<SoundName, (ctx: AudioContext, volume: number) => vo
   },
   tick: (ctx, v) => tone(ctx, "square", 880, 880, 0.08, v * 0.35),
   go: (ctx, v) => tone(ctx, "square", 1320, 1320, 0.3, v * 0.4),
+  // O alarme do aperto: três sobe-e-desce.
+  hurry: (ctx, v) => {
+    for (let i = 0; i < 3; i++) {
+      tone(ctx, "square", 660, 660, 0.12, v * 0.35, i * 0.28);
+      tone(ctx, "square", 990, 990, 0.12, v * 0.35, i * 0.28 + 0.14);
+    }
+  },
+  // O bloco do aperto assentando: um baque curto e grave.
+  crush: (ctx, v) => tone(ctx, "triangle", 140, 45, 0.12, v * 0.6),
 };
 
 export function playSound(name: SoundName, volume = VOLUME) {

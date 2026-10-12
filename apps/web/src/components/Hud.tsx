@@ -2,6 +2,7 @@ import {
   CURSE_NAME,
   LIVES,
   MAX_PLAYERS,
+  hurryTimeOf,
   SLOT_COLORS,
   type ArenaState,
   type Curse,
@@ -47,7 +48,7 @@ function Timer({ state }: { state: ArenaState }) {
   const seconds = Math.ceil(state.timeLeft / 1000);
   const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
   const ss = String(seconds % 60).padStart(2, "0");
-  const urgent = state.phase === "playing" && seconds <= 30;
+  const urgent = state.phase === "playing" && seconds <= hurryTimeOf(state.arenaId) / 1000;
   return (
     <div className={["bomb-timer order-first basis-full text-center sm:order-none sm:basis-auto", urgent && "is-urgent"]
       .filter(Boolean)

@@ -14,6 +14,9 @@ import {
   FLAME_H,
   FLAME_TIME,
   FLOOR,
+  HURRY_DROP_MS,
+  HURRY_TIME,
+  INVULNERABLE_TIME,
   LIVES,
   MATCH_MINUTES,
   MAX_SPEED_LEVEL,
@@ -22,6 +25,7 @@ import {
   WALL,
   arenaById,
   defineArena,
+  hurryOrder,
   minMinutesFor,
   type Curse,
 } from "@bomb/shared";
@@ -884,5 +888,91 @@ describe("o controle remoto", () => {
       game.tick(16);
       expect(game.bombs[0].remote).toBe(false);
     }
+  });
+});
+
+describe("o aperto (hurry up)", () => {
+  /** Uma rodada a um passo do aperto. */
+  function nearHurry(count = 2, arena = EMPTY_ARENA) {
+    const game = open(count, () => 0.99, arena);
+    game.timeLeft = HURRY_TIME[arena.size] + 100;
+    return game;
+  }
+
+  it("a espiral anda pela borda no sentido do relógio, pula os pilares e fecha a arena inteira", () => {
+    const order = hurryOrder(EMPTY_ARENA);
+    expect(order.slice(0, 3)).toEqual([[1, 1], [2, 1], [3, 1]]);
+    // Depois da fileira de cima, desce pela coluna da direita.
+    expect(order[COLS - 2]).toEqual([COLS - 2, 2]);
+    // Sem repetir célula.
+    expect(new Set(order.map(([x, y]) => `${x},${y}`)).size).toBe(order.length);
+    // Na referência, nenhum pilar entra na lista.
+    for (const [cx, cy] of hurryOrder(ARENA)) expect(ARENA.layout[cy][cx]).not.toBe("P");
+    // Na pequena, toda célula que não é muralha nem pilar entra, e o meio é a última.
+    const small = arenaById("small-classic")!;
+    const free = small.layout.join("").split("").filter((ch) => ch !== "#" && ch !== "P").length;
+    const smallOrder = hurryOrder(small);
+    expect(smallOrder).toHaveLength(free);
+    const center = Math.floor(small.cols / 2);
+    expect(smallOrder.at(-1)).toEqual([center, center]);
+  });
+
+  it("começa com 10, 20 e 45 segundos na pequena, na média e na grande", () => {
+    expect(HURRY_TIME).toEqual({ small: 10_000, medium: 20_000, large: 45_000 });
+    const game = nearHurry(2, arenaById("small-classic")!);
+    run(game, 150);
+    expect(game.hurry).toBe(1);
+  });
+
+  it("com o aperto valendo, o tempo acabar não termina a rodada: ela acaba quando sobra um", () => {
+    const game = nearHurry();
+    run(game, 150);
+    game.timeLeft = 0;
+    run(game, 100);
+    expect(game.phase).toBe("playing");
+    // Os dois parados nos cantos: os blocos acabam com eles, e a rodada termina.
+    run(game, HURRY_DROP_MS * hurryOrder(EMPTY_ARENA).length + 5000);
+    expect(game.phase).toBe("finished");
+    // Quem ficou sem lugar saiu; quem sobrou venceu (ou ninguém, se caíram juntos).
+    expect(game.players.filter((p) => p.lives > 0).length).toBeLessThanOrEqual(1);
+  });
+
+  it("começa faltando 45 segundos e derruba um bloco a cada intervalo, na ordem da espiral", () => {
+    const game = nearHurry();
+    run(game, 50);
+    expect(game.hurry).toBe(0);
+    run(game, 100);
+    expect(game.hurry).toBe(1);
+    expect(game.takeFx().some((e) => e.k === "hurry")).toBe(true);
+    run(game, HURRY_DROP_MS * 3);
+    expect(game.hurry).toBe(4);
+    const order = hurryOrder(EMPTY_ARENA);
+    for (const [cx, cy] of order.slice(0, 3)) expect(game.grid[cellIndex(cx, cy)]).toBe(WALL);
+    expect(game.grid[cellIndex(...order[3])]).toBe(FLOOR);
+  });
+
+  it("esmaga quem está na célula (mesmo piscando) e leva a bomba sem explodir", () => {
+    const game = nearHurry();
+    const [p0] = game.players;
+    p0.invulnerableUntil = game.time + INVULNERABLE_TIME;
+    // O primeiro bloco cai no canto do P1, com a bomba dele embaixo.
+    game.requestBomb("p0");
+    run(game, 16);
+    expect(game.bombs).toHaveLength(1);
+    run(game, 100 + HURRY_DROP_MS);
+    expect(game.bombs).toHaveLength(0);
+    expect(game.flames).toHaveLength(0);
+    expect(p0.alive).toBe(false);
+    expect(p0.lives).toBe(LIVES - 1);
+  });
+
+  it("quem morre renasce no chão livre mais perto do canto, não dentro do bloco", () => {
+    const game = nearHurry();
+    const [p0] = game.players;
+    run(game, 150 + HURRY_DROP_MS);
+    expect(p0.alive).toBe(false);
+    run(game, 3000);
+    expect(p0.alive).toBe(true);
+    expect(game.grid[cellIndex(Math.floor(p0.x), Math.floor(p0.y))]).toBe(FLOOR);
   });
 });
