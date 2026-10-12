@@ -89,7 +89,7 @@ export type Direction = typeof DOWN | typeof LEFT | typeof RIGHT | typeof UP;
 
 /* ---------------------------------------------------------------- itens */
 
-export const POWERUPS = ["fire", "bomb", "boot", "kick", "pierce", "skull"] as const;
+export const POWERUPS = ["fire", "bomb", "boot", "kick", "pierce", "skull", "swap", "ghost"] as const;
 export type Powerup = (typeof POWERUPS)[number];
 
 export const POWERUP_NAME: Record<Powerup, string> = {
@@ -99,12 +99,20 @@ export const POWERUP_NAME: Record<Powerup, string> = {
   kick: "chute",
   pierce: "perfurante",
   skull: "caveira",
+  swap: "troca",
+  ghost: "invisível",
 };
+
+/** Quanto tempo o item da invisibilidade dura. */
+export const GHOST_TIME = 10_000;
 
 /** A bomba chutada desliza a tantas células por segundo, até a última livre antes de um bloco, bomba ou jogador. */
 export const KICK_SPEED = 6;
 
-/** As maldições da caveira. Uma sorteada por caveira, pelo tempo de `CURSE_TIME`. */
+/**
+ * As maldições da caveira. Uma sorteada por caveira, pelo tempo de `CURSE_TIME`;
+ * todas pegam: quem encosta num amaldiçoado leva a mesma, pelo tempo inteiro.
+ */
 export const CURSES = [
   "slow",
   "fast",
@@ -116,17 +124,8 @@ export const CURSES = [
   "shortfuse",
   "longfuse",
   "single",
-  "ghost",
-  "plague",
-  "swap",
 ] as const;
 export type Curse = (typeof CURSES)[number];
-
-/**
- * As que ficam no jogador por `CURSE_TIME`. O contágio e a troca não ficam:
- * o contágio sorteia uma destas e a deixa contagiosa; a troca acontece na hora.
- */
-export const LASTING_CURSES = CURSES.filter((c) => c !== "plague" && c !== "swap");
 
 export const CURSE_NAME: Record<Curse, string> = {
   slow: "lento",
@@ -139,9 +138,6 @@ export const CURSE_NAME: Record<Curse, string> = {
   shortfuse: "pavio curto",
   longfuse: "pavio longo",
   single: "uma bomba só",
-  ghost: "invisível",
-  plague: "contágio",
-  swap: "troca",
 };
 
 /** O pavio das bombas de quem tem esta maldição (ou nenhuma). */
@@ -205,8 +201,8 @@ export type PublicPlayer = {
   pierce: boolean;
   invulnerable: boolean;
   curse: Curse | "";
-  /** A maldição passa para quem ele encostar (o contágio). */
-  contagious: boolean;
+  /** Com o item da invisibilidade: os outros não o veem (só num lampejo). */
+  ghost: boolean;
   /** Rodadas vencidas nesta sala. */
   wins: number;
   /** O último comando de entrada que o servidor aplicou para este jogador (ver `net.ts`). */

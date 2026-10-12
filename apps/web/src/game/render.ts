@@ -115,7 +115,7 @@ export class ArenaRenderer {
   private canvas: HTMLCanvasElement;
   /** Quem joga nesta tela: o boneco dele é o previsto, e o relógio do servidor guia a interpolação dos outros. */
   private local: { id: string; player: LocalPlayer } | null = null;
-  /** Quem olha a tela (também no /mock, sem previsão): o invisível só aparece para ele. */
+  /** Quem olha a tela (também no /mock, sem previsão): o invisível só aparece inteiro para ele. */
   private viewer = "";
   private lastNow = 0;
   /** O instante (na linha do tempo das amostras) que este quadro desenha. */
@@ -493,9 +493,9 @@ export class ArenaRenderer {
     // Intocável: pisca em quadros.
     if (player.invulnerable && Math.floor(now / 100) % 2 === 0) return;
 
-    // Invisível: quem olha a si mesmo se vê meio apagado; os outros só o
-    // pegam num lampejo a cada 1,5 s.
-    if (player.curse === "ghost" && state.phase === "playing") {
+    // Invisível (o item): quem olha a si mesmo se vê meio apagado; os outros
+    // só o pegam num lampejo a cada 1,5 s.
+    if (player.ghost && state.phase === "playing") {
       const self = player.id === this.viewer;
       if (!self && now % 1500 >= 150) return;
       ctx.save();

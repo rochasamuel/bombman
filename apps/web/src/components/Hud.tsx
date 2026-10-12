@@ -111,15 +111,16 @@ function Panel({
   );
 }
 
-/** Os poderes, em miúdo: 🔥 alcance, 💣 bombas, 👟 velocidade, 🦶 chute e ⚡ perfurante quando os tem. A maldição, se houver. */
+/** Os poderes, em miúdo: 🔥 alcance, 💣 bombas, 👟 velocidade, 🦶 chute e ⚡ perfurante quando os tem. 👻 invisível. A maldição, se houver. */
 function Stats({ player }: { player: PublicPlayer }) {
   return (
     <span className="px-label ml-1 hidden whitespace-nowrap sm:inline" style={{ letterSpacing: 0 }}>
       🔥{player.range} 💣{player.bombs} 👟{player.speed}
       {player.kick && <span title="chute"> 🦶</span>}
       {player.pierce && <span title="perfurante"> ⚡</span>}
+      {player.ghost && <span title="invisível"> 👻</span>}
       {player.curse && (
-        <span style={{ color: "var(--mark)" }} title={`${CURSE_NAME[player.curse as Curse]}${player.contagious ? " (contagiosa)" : ""}`}>
+        <span style={{ color: "var(--mark)" }} title={CURSE_NAME[player.curse as Curse]}>
           {" "}
           💀
         </span>

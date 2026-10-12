@@ -206,8 +206,8 @@ describe("o atlas", () => {
     expect(FLAME_STEPS).toBe(8);
     expect(names).not.toContain("flame_center_alt");
     expect(names).not.toContain("flame_center");
-    // Os itens: quatro quadros cada, a caveira inclusive (ela vem da folha antiga, parada).
-    for (const kind of ["fire", "bomb", "boot", "kick", "pierce", "skull"]) {
+    // Os itens: quatro quadros cada, a troca e a invisibilidade (folha própria) inclusive.
+    for (const kind of ["fire", "bomb", "boot", "kick", "pierce", "skull", "swap", "ghost"]) {
       for (let i = 0; i < POWERUP_STEPS; i++) expect(names).toContain(`pu_${kind}${i}`);
     }
     expect(POWERUP_STEPS).toBe(4);

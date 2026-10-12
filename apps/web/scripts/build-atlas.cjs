@@ -12,11 +12,13 @@
  *                                <bomb-pierce-sheet.png> \
  *                                <enchanted_forest_tileset.png> <volcanic_fortress_tileset.png> \
  *                                <frozen_citadel_tileset.png> <cyberpunk_facility_tileset.png> \
- *                                <desert_temple_tileset.png>
+ *                                <desert_temple_tileset.png> <bomb-social-items-sheet.png>
  *
  * Os cinco últimos são os tilesets dos temas novos (ver `themes.cjs`): cada um
  * dá ao atlas as mesmas peças de cenário que o da referência, com o nome do
- * tema na frente (`forest_floor0`, `volcano_wall_t`…).
+ * tema na frente (`forest_floor0`, `volcano_wall_t`…). Depois deles, a folha
+ * dos itens da troca e da invisibilidade (duas colunas, quatro quadros de
+ * brilho, fundo transparente).
  *
  * A folha da vitória é o boneco de frente, na escala do parado, erguendo os
  * braços (25 quadros numa grade de 5×5). O tileset do cenário dá o chão, a
@@ -71,16 +73,19 @@ const [
   explosionSheetPath,
   itemSheetPath,
   pierceSheetPath,
-  ...themePaths
+  ...rest
 ] = process.argv;
 /** A ordem dos tilesets dos temas na linha de comando. */
 const THEME_ORDER = ["forest", "volcano", "frozen", "cyber", "desert"];
-if (!pierceSheetPath || themePaths.length !== THEME_ORDER.length) {
+const themePaths = rest.slice(0, THEME_ORDER.length);
+const socialSheetPath = rest[THEME_ORDER.length];
+if (!pierceSheetPath || rest.length !== THEME_ORDER.length + 1) {
   console.error(
     "uso: node scripts/build-atlas.cjs <arena.png> <sheet.png> <walk-down.png> <walk-up.png> <walk-side.png> " +
       "<idle-down.png> <idle-up.png> <idle-right.png> <idle-left.png> <victory-down.png> <scenario-tiles.png> " +
       "<bomb-sheet.png> <explosion-sheet.png> <items-sheet.png> <pierce-bomb-sheet.png> " +
-      "<forest-tileset.png> <volcano-tileset.png> <frozen-tileset.png> <cyber-tileset.png> <desert-tileset.png>",
+      "<forest-tileset.png> <volcano-tileset.png> <frozen-tileset.png> <cyber-tileset.png> <desert-tileset.png> " +
+        "<social-items-sheet.png>",
   );
   process.exit(1);
 }
@@ -111,6 +116,7 @@ const bombSheet = PNG.sync.read(fs.readFileSync(bombSheetPath));
 const explosionSheet = PNG.sync.read(fs.readFileSync(explosionSheetPath));
 const itemSheet = PNG.sync.read(fs.readFileSync(itemSheetPath));
 const pierceSheet = PNG.sync.read(fs.readFileSync(pierceSheetPath));
+const socialSheet = PNG.sync.read(fs.readFileSync(socialSheetPath));
 
 /* -------------------------------------------------------------- utilidades */
 
@@ -756,7 +762,30 @@ const ITEM_ROWS = [
 const ITEMS = { fire: 0, bomb: 1, boot: 2, pierce: 3, kick: 4, skull: 5 };
 for (const [kind, col] of Object.entries(ITEMS)) {
   const [x0, x1] = ITEM_COLS[col];
-  const cells = ITEM_ROWS.map(([y0, y1]) => keyGradient(itemSheet, x0, y0, x1 - x0, y1 - y0));
+  addItem(kind, ITEM_ROWS.map(([y0, y1]) => keyGradient(itemSheet, x0, y0, x1 - x0, y1 - y0)));
+}
+
+/* A troca e a invisibilidade (`bomb-social-items-sheet.png`, de 2026-10-12):
+ * a mesma moldura dourada, uma coluna cada, quatro quadros de brilho, e o
+ * fundo já transparente — só se recorta a janela. */
+const SOCIAL_COLS = [
+  [50, 440],
+  [455, 840],
+];
+const SOCIAL_ROWS = [
+  [50, 440],
+  [455, 850],
+  [860, 1255],
+  [1265, 1660],
+];
+const SOCIAL_ITEMS = { swap: 0, ghost: 1 };
+for (const [kind, col] of Object.entries(SOCIAL_ITEMS)) {
+  const [x0, x1] = SOCIAL_COLS[col];
+  addItem(kind, SOCIAL_ROWS.map(([y0, y1]) => crop(socialSheet, x0, y0, x1 - x0, y1 - y0)));
+}
+
+/** Um item: os quatro quadros pelo mesmo retângulo (a união deles), numa escala só. */
+function addItem(kind, cells) {
   // O retângulo justo da união dos quatro quadros, em coordenadas da janela.
   const box = { x0: Infinity, y0: Infinity, x1: -1, y1: -1 };
   for (const cell of cells) {

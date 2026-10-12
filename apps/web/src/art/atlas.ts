@@ -196,7 +196,7 @@ export const flame = (piece: FlamePiece, step: number) => frame(`flame_${piece}$
 
 /** Cada item brilha em quatro quadros. */
 export const POWERUP_STEPS = 4;
-export const POWERUP_KINDS = ["fire", "bomb", "boot", "kick", "pierce", "skull"];
+export const POWERUP_KINDS = ["fire", "bomb", "boot", "kick", "pierce", "skull", "swap", "ghost"];
 export function powerup(kind: string, step: number): Frame {
   const name = `pu_${POWERUP_KINDS.includes(kind) ? kind : "fire"}${wrap(step, POWERUP_STEPS)}`;
   return frame(name);

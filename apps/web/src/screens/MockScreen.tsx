@@ -3,6 +3,7 @@ import {
   BombGame,
   CURSES,
   CURSE_NAME,
+  POWERUP_NAME,
   DEFAULT_ARENA,
   GameError,
   ARENA_SIZE_NAME,
@@ -194,19 +195,17 @@ function MockMatch({
     return () => handlers.delete(handler);
   }, []);
 
-  const mine = state.players.find((p) => p.id === ME);
-  // O contágio aparece como a maldição sorteada, contagiosa: o botão aceso é o dele.
-  const curse = mine?.contagious ? "plague" : (mine?.curse ?? "");
+  const curse = state.players.find((p) => p.id === ME)?.curse ?? "";
+  const me = () => game.players.find((p) => p.id === ME);
   const lay = (next: Curse | "") => {
-    const me = game.players.find((p) => p.id === ME);
-    if (!me) return;
-    if (next) {
-      game.curse(me, next);
-      return;
-    }
-    me.curse = "";
-    me.contagious = false;
-    me.curseUntil = 0;
+    const player = me();
+    if (!player) return;
+    if (next) game.curse(player, next);
+    else player.curse = "";
+  };
+  const give = (kind: "swap" | "ghost") => {
+    const player = me();
+    if (player) game.apply(player, kind);
   };
 
   return (
@@ -220,17 +219,26 @@ function MockMatch({
         onEmote={onEmote}
         onExit={onExit}
       />
-      <CursePanel active={curse} onLay={lay} />
+      <CursePanel active={curse} onLay={lay} onGive={give} />
     </>
   );
 }
 
 /**
  * As maldições à mão: cada botão amaldiçoa o vermelho por `CURSE_TIME`, como
- * a caveira faria. O botão solta o foco ao clicar: senão o espaço (a bomba)
+ * a caveira faria; embaixo, os itens da troca e da invisibilidade, como se
+ * ele os pegasse. O botão solta o foco ao clicar: senão o espaço (a bomba)
  * apertaria o botão de novo.
  */
-function CursePanel({ active, onLay }: { active: Curse | ""; onLay: (curse: Curse | "") => void }) {
+function CursePanel({
+  active,
+  onLay,
+  onGive,
+}: {
+  active: Curse | "";
+  onLay: (curse: Curse | "") => void;
+  onGive: (kind: "swap" | "ghost") => void;
+}) {
   const press = (event: React.MouseEvent<HTMLButtonElement>, curse: Curse | "") => {
     event.currentTarget.blur();
     onLay(curse);
@@ -253,6 +261,22 @@ function CursePanel({ active, onLay }: { active: Curse | ""; onLay: (curse: Curs
         <button type="button" className="px-link text-sm" disabled={!active} onClick={(event) => press(event, "")}>
           limpar
         </button>
+      </div>
+      <div className="mt-2 flex gap-x-3">
+        <span className="px-label">itens</span>
+        {(["swap", "ghost"] as const).map((kind) => (
+          <button
+            key={kind}
+            type="button"
+            className="px-link text-sm"
+            onClick={(event) => {
+              event.currentTarget.blur();
+              onGive(kind);
+            }}
+          >
+            {POWERUP_NAME[kind]}
+          </button>
+        ))}
       </div>
     </details>
   );
@@ -346,7 +370,7 @@ function publicPlayer(game: BombGame, player: GamePlayer): PublicPlayer {
     pierce: player.pierce,
     invulnerable: player.alive && game.time < player.invulnerableUntil,
     curse: player.curse,
-    contagious: player.contagious,
+    ghost: player.alive && game.time < player.ghostUntil,
     wins: player.wins,
     seq: player.queue.ack,
   };
@@ -365,7 +389,7 @@ function signatureOf(state: ArenaState): string {
     state.log.length,
     state.log.at(-1),
     ...state.players.map(
-      (p) => `${p.id}${p.lives}${p.alive}${p.range}${p.bombs}${p.speed}${p.curse}${p.contagious}${p.wins}`,
+      (p) => `${p.id}${p.lives}${p.alive}${p.range}${p.bombs}${p.speed}${p.curse}${p.ghost}${p.wins}`,
     ),
   ].join("|");
 }

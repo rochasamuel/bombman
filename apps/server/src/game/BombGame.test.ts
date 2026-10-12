@@ -4,6 +4,7 @@ import {
   BRICK,
   COUNTDOWN,
   CURSE_TIME,
+  GHOST_TIME,
   DEFAULT_MATCH_MINUTES,
   EMPTY_ARENA,
   FLAME_CENTER,
@@ -719,59 +720,64 @@ describe("as maldições", () => {
   });
 });
 
-describe("as maldições sociais", () => {
-  it("contágio: sorteia uma que fica e passa a quem encostar", () => {
+describe("o contágio", () => {
+  it("toda maldição passa a quem encostar, pelo tempo inteiro", () => {
     const game = open();
     const [a, b] = game.players;
-    game.curse(a, "plague");
-    expect(a.contagious).toBe(true);
-    expect(a.curse).not.toBe("");
-    expect(["plague", "swap"]).not.toContain(a.curse);
+    game.curse(a, "reverse");
+    run(game, 5000);
     b.x = a.x + 0.5;
     b.y = a.y;
     game.tick(16);
-    expect(b.curse).toBe(a.curse);
-    expect(b.contagious).toBe(true);
+    expect(b.curse).toBe("reverse");
+    // Separados (encostados, um devolveria ao outro quando a dele acabasse).
+    b.x = COLS - 2.5;
+    // O que pegou agora tem os 15 s inteiros; quem passou, só o que sobrava.
+    run(game, CURSE_TIME - 2000);
+    expect(a.curse).toBe("");
+    expect(b.curse).toBe("reverse");
   });
 
-  it("contágio: de longe não pega, e morrer cura", () => {
+  it("de longe não pega, e morrer cura", () => {
     const game = open();
     const [a, b] = game.players;
-    game.curse(a, "plague");
+    game.curse(a, "slow");
     game.tick(16);
     expect(b.curse).toBe("");
     game.flames.push({ cx: 1, cy: 1, kind: FLAME_CENTER, until: game.time + 100, born: game.time });
     game.tick(16);
     expect(a.alive).toBe(false);
     expect(a.curse).toBe("");
-    expect(a.contagious).toBe(false);
   });
+});
 
-  it("troca: os dois trocam de lugar na hora, e nada fica", () => {
+describe("os itens da troca e da invisibilidade", () => {
+  it("troca: os dois trocam de lugar na hora", () => {
     const game = open();
     const [a, b] = game.players;
     const at = { a: [a.x, a.y], b: [b.x, b.y] };
-    game.curse(a, "swap");
+    game.apply(a, "swap");
     expect([a.x, a.y]).toEqual(at.b);
     expect([b.x, b.y]).toEqual(at.a);
-    expect(a.curse).toBe("");
   });
 
-  it("troca sem ninguém de pé vira uma maldição comum", () => {
+  it("troca sem ninguém de pé não faz nada", () => {
     const game = open();
     const [a, b] = game.players;
     b.alive = false;
-    game.curse(a, "swap");
-    expect(a.x).toBe(1.5);
-    expect(a.curse).not.toBe("");
+    game.apply(a, "swap");
+    expect([a.x, a.y]).toEqual([1.5, 1.5]);
   });
 
-  it("invisível fica no jogador pelo tempo da caveira", () => {
+  it("invisível dura o tempo do item e não pega em ninguém", () => {
     const game = open();
-    const [a] = game.players;
-    game.curse(a, "ghost");
-    expect(a.curse).toBe("ghost");
-    run(game, CURSE_TIME + 32);
+    const [a, b] = game.players;
+    game.apply(a, "ghost");
+    expect(a.ghostUntil).toBe(game.time + GHOST_TIME);
+    b.x = a.x + 0.5;
+    b.y = a.y;
+    game.tick(16);
+    expect(b.ghostUntil).toBe(0);
     expect(a.curse).toBe("");
   });
 });
