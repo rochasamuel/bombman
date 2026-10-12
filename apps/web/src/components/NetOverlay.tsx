@@ -4,7 +4,8 @@ import type { LocalPlayer } from "../game/local";
 import { browserConfig } from "../game/netconfig";
 
 /*
- * O diagnóstico de rede, no canto da tela. Fechado por padrão; F3 abre e
+ * O diagnóstico de rede, no canto da tela. Fechado por padrão; a tecla à
+ * esquerda do 1 (' no ABNT, ` no americano — `Backquote`, pela posição) abre e
  * fecha (e a escolha fica guardada), `?net=1` abre ao carregar. Aberto, ele
  * liga o ping nativo do Colyseus e pede as estatísticas do relógio da sala.
  * Lê contadores quatro vezes por segundo: não custa nada ao desenho.
@@ -22,7 +23,9 @@ export function NetOverlay({ local, setDiag }: { local: LocalPlayer; setDiag?: (
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (event.code !== "F3") return;
+      // F3 não serve: no navegador é "procurar na página".
+      if (event.code !== "Backquote" || event.repeat || event.ctrlKey || event.altKey || event.metaKey) return;
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
       event.preventDefault();
       setOpen((was) => {
         try {
@@ -96,7 +99,7 @@ export function NetOverlay({ local, setDiag }: { local: LocalPlayer; setDiag?: (
           ))}
         </tbody>
       </table>
-      <div style={{ opacity: 0.6, marginTop: 2 }}>F3 fecha</div>
+      <div style={{ opacity: 0.6, marginTop: 2 }}>' (esquerda do 1) fecha</div>
     </div>
   );
 }

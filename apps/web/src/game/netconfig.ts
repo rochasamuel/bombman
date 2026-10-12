@@ -13,7 +13,7 @@ import { DEFAULT_PREDICT, type PredictConfig } from "./predict";
  *   correct   meia-vida da correção visual do próprio boneco, ms             VITE_CORRECTION_MS
  *   pending   comandos não confirmados guardados                             VITE_MAX_PENDING
  *   catchup   passos fixos recuperados num quadro lento                      VITE_MAX_CATCHUP
- *   net       1 mostra o diagnóstico ao abrir (F3 alterna sempre)            VITE_NET_DIAG
+ *   net       1 mostra o diagnóstico ao abrir (' alterna sempre)             VITE_NET_DIAG
  */
 
 export type ClientNetConfig = {

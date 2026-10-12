@@ -323,7 +323,7 @@ Tela (no build, `VITE_*`; ou na URL, `?interp=80`, ou em
 
 ### Diagnóstico
 
-**F3** na arena abre e fecha o painel de rede (fechado por padrão, também em
+A tecla **à esquerda do 1** (`'` no teclado ABNT, `` ` `` no americano) abre e fecha, na arena, o painel de rede (fechado por padrão, também em
 produção; a escolha fica guardada). Ele mostra RTT e variação (ping nativo),
 jitter e idade do estado, o atraso de interpolação em uso, comandos pendentes,
 tempo de confirmação, reconciliações, correções (contagem, média, máxima),
@@ -400,7 +400,7 @@ Para comparar:
 1. Suba o mesmo build em duas regiões (a atual, nos EUA, e uma em São Paulo,
    ex.: `gru`/`sa-east-1`), com `NET_LOG_SECONDS=60`.
 2. Do Brasil, abra uma sala em cada uma (`VITE_SERVER_URL` diferente, ou dois
-   builds) e jogue alguns minutos com F3 aberto. Anote RTT e variação,
+   builds) e jogue alguns minutos com o painel de rede aberto (tecla à esquerda do 1). Anote RTT e variação,
    confirmação, correções/min e máxima, idade do estado e o atraso de
    interpolação adaptado.
 3. No servidor, compare `hz`, `tickAvg`/`tickMax`, `lateMax` e `droppedMs`

@@ -90,7 +90,7 @@ export function useRoomConnection(code: string): RoomConnection {
     (room: Room, playerName: string, seatKey: string) => {
       roomRef.current = room;
       // Só em desenvolvimento: a sala à mão no console, para olhar o estado vivo.
-      if (import.meta.env.DEV) (window as unknown as { __room?: Room }).__room = room;
+      if (import.meta.env.DEV) Object.assign(window, { __room: room, __local: local });
       setSessionId(room.sessionId);
       setStatus("connected");
       setDropped(false);
