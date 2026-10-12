@@ -57,6 +57,7 @@ function snapshot(game: BombGame, tick: number): ArenaState {
       pierce: p.pierce,
       invulnerable: false,
       curse: p.curse,
+      contagious: p.contagious,
       wins: p.wins,
       seq: p.queue.ack,
     })),

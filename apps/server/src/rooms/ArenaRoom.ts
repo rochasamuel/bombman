@@ -481,6 +481,7 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
       entry.speed = player.speed;
       entry.invulnerable = player.alive && game.time < player.invulnerableUntil;
       entry.curse = player.curse;
+      entry.contagious = player.contagious;
       entry.wins = player.wins;
     });
     return moved;

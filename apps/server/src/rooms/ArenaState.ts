@@ -31,6 +31,7 @@ export class PlayerState extends Schema {
   @type("boolean") pierce = false;
   @type("boolean") invulnerable = false;
   @type("string") curse = "";
+  @type("boolean") contagious = false;
   @type("uint8") wins = 0;
   /** O último comando de entrada aplicado: a tela descarta até ele e reaplica o resto. */
   @type("uint32") seq = 0;

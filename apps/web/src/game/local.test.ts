@@ -26,7 +26,7 @@ function playing(): ArenaState {
     players: game.players.map((p) => ({
       id: p.id, name: p.name, slot: p.slot, connected: true, x: p.x, y: p.y, dir: p.dir, moving: false,
       alive: true, dying: false, lives: 3, range: 1, bombs: 1, speed: 0, kick: false, pierce: false,
-      invulnerable: false, curse: "", wins: 0, seq: 0,
+      invulnerable: false, curse: "", contagious: false, wins: 0, seq: 0,
     })),
     grid: [...game.grid],
     bombs: [],

@@ -3,6 +3,7 @@ import {
   BOMB_FUSE,
   BRICK,
   COUNTDOWN,
+  CURSE_TIME,
   DEFAULT_MATCH_MINUTES,
   EMPTY_ARENA,
   FLAME_CENTER,
@@ -715,5 +716,62 @@ describe("as maldições", () => {
     expect(long.game.bombs).toHaveLength(1);
     run(long.game, BOMB_FUSE);
     expect(long.game.bombs).toHaveLength(0);
+  });
+});
+
+describe("as maldições sociais", () => {
+  it("contágio: sorteia uma que fica e passa a quem encostar", () => {
+    const game = open();
+    const [a, b] = game.players;
+    game.curse(a, "plague");
+    expect(a.contagious).toBe(true);
+    expect(a.curse).not.toBe("");
+    expect(["plague", "swap"]).not.toContain(a.curse);
+    b.x = a.x + 0.5;
+    b.y = a.y;
+    game.tick(16);
+    expect(b.curse).toBe(a.curse);
+    expect(b.contagious).toBe(true);
+  });
+
+  it("contágio: de longe não pega, e morrer cura", () => {
+    const game = open();
+    const [a, b] = game.players;
+    game.curse(a, "plague");
+    game.tick(16);
+    expect(b.curse).toBe("");
+    game.flames.push({ cx: 1, cy: 1, kind: FLAME_CENTER, until: game.time + 100, born: game.time });
+    game.tick(16);
+    expect(a.alive).toBe(false);
+    expect(a.curse).toBe("");
+    expect(a.contagious).toBe(false);
+  });
+
+  it("troca: os dois trocam de lugar na hora, e nada fica", () => {
+    const game = open();
+    const [a, b] = game.players;
+    const at = { a: [a.x, a.y], b: [b.x, b.y] };
+    game.curse(a, "swap");
+    expect([a.x, a.y]).toEqual(at.b);
+    expect([b.x, b.y]).toEqual(at.a);
+    expect(a.curse).toBe("");
+  });
+
+  it("troca sem ninguém de pé vira uma maldição comum", () => {
+    const game = open();
+    const [a, b] = game.players;
+    b.alive = false;
+    game.curse(a, "swap");
+    expect(a.x).toBe(1.5);
+    expect(a.curse).not.toBe("");
+  });
+
+  it("invisível fica no jogador pelo tempo da caveira", () => {
+    const game = open();
+    const [a] = game.players;
+    game.curse(a, "ghost");
+    expect(a.curse).toBe("ghost");
+    run(game, CURSE_TIME + 32);
+    expect(a.curse).toBe("");
   });
 });

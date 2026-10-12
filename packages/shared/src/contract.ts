@@ -116,8 +116,17 @@ export const CURSES = [
   "shortfuse",
   "longfuse",
   "single",
+  "ghost",
+  "plague",
+  "swap",
 ] as const;
 export type Curse = (typeof CURSES)[number];
+
+/**
+ * As que ficam no jogador por `CURSE_TIME`. O contágio e a troca não ficam:
+ * o contágio sorteia uma destas e a deixa contagiosa; a troca acontece na hora.
+ */
+export const LASTING_CURSES = CURSES.filter((c) => c !== "plague" && c !== "swap");
 
 export const CURSE_NAME: Record<Curse, string> = {
   slow: "lento",
@@ -130,6 +139,9 @@ export const CURSE_NAME: Record<Curse, string> = {
   shortfuse: "pavio curto",
   longfuse: "pavio longo",
   single: "uma bomba só",
+  ghost: "invisível",
+  plague: "contágio",
+  swap: "troca",
 };
 
 /** O pavio das bombas de quem tem esta maldição (ou nenhuma). */
@@ -193,6 +205,8 @@ export type PublicPlayer = {
   pierce: boolean;
   invulnerable: boolean;
   curse: Curse | "";
+  /** A maldição passa para quem ele encostar (o contágio). */
+  contagious: boolean;
   /** Rodadas vencidas nesta sala. */
   wins: number;
   /** O último comando de entrada que o servidor aplicou para este jogador (ver `net.ts`). */

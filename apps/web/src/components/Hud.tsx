@@ -119,7 +119,7 @@ function Stats({ player }: { player: PublicPlayer }) {
       {player.kick && <span title="chute"> 🦶</span>}
       {player.pierce && <span title="perfurante"> ⚡</span>}
       {player.curse && (
-        <span style={{ color: "var(--mark)" }} title={CURSE_NAME[player.curse as Curse]}>
+        <span style={{ color: "var(--mark)" }} title={`${CURSE_NAME[player.curse as Curse]}${player.contagious ? " (contagiosa)" : ""}`}>
           {" "}
           💀
         </span>

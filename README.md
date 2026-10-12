@@ -18,9 +18,11 @@ fogo, 💣 mais bombas, 👟 mais velocidade, 🦶 o chute (andar contra uma bom
 empurra: ela desliza a 6 células/s e para na última célula livre antes de
 bloco, bomba ou jogador, com o pavio contando), ⚡ a perfurante (as bombas
 nascem vermelhas com uma ponta dourada e a explosão delas atravessa tijolos e bombas, parando só em
-muralha e pilar; morrer leva o chute e a perfurante, só eles), 💀 uma maldição de quinze segundos (uma caveirinha paira sobre a cabeça enquanto dura) (uma sorteada entre dez: lento, rápido demais, invertido,
-sem freio, fogo fraco, bombas sem parar, sem bomba, pavio curto, pavio longo
-ou uma bomba só). Quem perde as três vidas sai; a última
+muralha e pilar; morrer leva o chute e a perfurante, só eles), 💀 uma maldição de quinze segundos (uma caveirinha paira sobre a cabeça enquanto dura) (uma sorteada entre treze: lento, rápido demais, invertido,
+sem freio, fogo fraco, bombas sem parar, sem bomba, pavio curto, pavio longo,
+uma bomba só, invisível — os outros só o veem num lampejo —, contágio — uma
+das outras, que passa a quem você encostar — ou troca — você troca de lugar
+na hora com um adversário sorteado). Quem perde as três vidas sai; a última
 pessoa de pé vence. Deu o tempo (3 minutos), vence quem tiver mais vidas.
 
 ## Arquitetura

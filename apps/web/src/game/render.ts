@@ -115,6 +115,8 @@ export class ArenaRenderer {
   private canvas: HTMLCanvasElement;
   /** Quem joga nesta tela: o boneco dele é o previsto, e o relógio do servidor guia a interpolação dos outros. */
   private local: { id: string; player: LocalPlayer } | null = null;
+  /** Quem olha a tela (também no /mock, sem previsão): o invisível só aparece para ele. */
+  private viewer = "";
   private lastNow = 0;
   /** O instante (na linha do tempo das amostras) que este quadro desenha. */
   private sampleNow = 0;
@@ -153,6 +155,7 @@ export class ArenaRenderer {
   /** Liga a previsão do boneco de `id` e a interpolação pelo relógio do servidor. Sem isto (o `/mock`), tudo pela chegada. */
   setLocal(id: string, player: LocalPlayer | undefined) {
     this.local = player && id ? { id, player } : null;
+    this.viewer = id;
   }
 
   /**
@@ -490,6 +493,18 @@ export class ArenaRenderer {
     // Intocável: pisca em quadros.
     if (player.invulnerable && Math.floor(now / 100) % 2 === 0) return;
 
+    // Invisível: quem olha a si mesmo se vê meio apagado; os outros só o
+    // pegam num lampejo a cada 1,5 s.
+    if (player.curse === "ghost" && state.phase === "playing") {
+      const self = player.id === this.viewer;
+      if (!self && now % 1500 >= 150) return;
+      ctx.save();
+      ctx.globalAlpha = self ? 0.45 : 0.3;
+      this.drawStanding(ctx, player, puppet, now, x, y, false);
+      ctx.restore();
+      return;
+    }
+
     const finished = state.phase === "finished";
     if (finished && state.winnerId === player.id) {
       // A vitória: a folha própria, de frente, no ritmo do parado.
@@ -497,6 +512,20 @@ export class ArenaRenderer {
       return;
     }
 
+    this.drawStanding(ctx, player, puppet, now, x, y, finished);
+  }
+
+  /** O boneco de pé (andando ou parado) e, amaldiçoado, a caveirinha. */
+  private drawStanding(
+    ctx: CanvasRenderingContext2D,
+    player: PublicPlayer,
+    puppet: Puppet,
+    now: number,
+    x: number,
+    y: number,
+    finished: boolean,
+  ) {
+    const w = art.logicalWidth(art.character(player.slot, "down", 0));
     const facing = FACING[player.dir] ?? "down";
     const walking = player.moving && !finished;
     // Andando, o passo segue a distância; parado, a respiração segue o relógio.

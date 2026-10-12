@@ -3,7 +3,6 @@ import {
   BombGame,
   CURSES,
   CURSE_NAME,
-  CURSE_TIME,
   DEFAULT_ARENA,
   GameError,
   ARENA_SIZE_NAME,
@@ -195,12 +194,19 @@ function MockMatch({
     return () => handlers.delete(handler);
   }, []);
 
-  const curse = state.players.find((p) => p.id === ME)?.curse ?? "";
+  const mine = state.players.find((p) => p.id === ME);
+  // O contágio aparece como a maldição sorteada, contagiosa: o botão aceso é o dele.
+  const curse = mine?.contagious ? "plague" : (mine?.curse ?? "");
   const lay = (next: Curse | "") => {
     const me = game.players.find((p) => p.id === ME);
     if (!me) return;
-    me.curse = next;
-    me.curseUntil = next ? game.time + CURSE_TIME : 0;
+    if (next) {
+      game.curse(me, next);
+      return;
+    }
+    me.curse = "";
+    me.contagious = false;
+    me.curseUntil = 0;
   };
 
   return (
@@ -340,6 +346,7 @@ function publicPlayer(game: BombGame, player: GamePlayer): PublicPlayer {
     pierce: player.pierce,
     invulnerable: player.alive && game.time < player.invulnerableUntil,
     curse: player.curse,
+    contagious: player.contagious,
     wins: player.wins,
     seq: player.queue.ack,
   };
@@ -358,7 +365,7 @@ function signatureOf(state: ArenaState): string {
     state.log.length,
     state.log.at(-1),
     ...state.players.map(
-      (p) => `${p.id}${p.lives}${p.alive}${p.range}${p.bombs}${p.speed}${p.curse}${p.wins}`,
+      (p) => `${p.id}${p.lives}${p.alive}${p.range}${p.bombs}${p.speed}${p.curse}${p.contagious}${p.wins}`,
     ),
   ].join("|");
 }

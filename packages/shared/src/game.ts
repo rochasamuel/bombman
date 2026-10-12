@@ -1,5 +1,6 @@
 import {
   BASE_SPEED,
+  LASTING_CURSES,
   bombFuse,
   bombLimit,
   BRICK,
@@ -96,6 +97,8 @@ export type GamePlayer = {
   invulnerableUntil: number;
   curse: Curse | "";
   curseUntil: number;
+  /** A maldição passa para quem ele encostar (o contágio). */
+  contagious: boolean;
   wins: number;
   input: { dx: number; dy: number };
   /**
@@ -160,6 +163,9 @@ const MAX_STEP_MS = 50;
 export function touches(player: { x: number; y: number }, cx: number, cy: number): boolean {
   return Math.abs(player.x - (cx + 0.5)) < 1 - 1e-6 && Math.abs(player.y - (cy + 0.5)) < 1 - 1e-6;
 }
+
+/** Quão perto (em células, nos dois eixos) dois bonecos se encostam para o contágio. */
+const CONTACT = 0.75;
 
 /** Quanto um comando anda: um passo fixo na velocidade do jogador. A previsão da tela usa a mesma conta. */
 export function commandDistance(player: { speed: number; curse: Curse | "" }): number {
@@ -288,6 +294,7 @@ export class BombGame {
       invulnerableUntil: 0,
       curse: "",
       curseUntil: 0,
+      contagious: false,
       wins: 0,
       input: { dx: 0, dy: 0 },
       queue: new InputQueue(this.inputLimits),
@@ -356,6 +363,7 @@ export class BombGame {
         invulnerableUntil: 0,
         curse: "",
         curseUntil: 0,
+        contagious: false,
         input: { dx: 0, dy: 0 },
         movingUntil: 0,
         wantsBomb: false,
@@ -466,6 +474,7 @@ export class BombGame {
     for (const player of this.players) {
       this.tickPlayer(player, seconds, dt);
     }
+    this.spread();
     this.tickBombs(seconds);
     this.tickFlames();
     this.tickDeaths();
@@ -473,7 +482,10 @@ export class BombGame {
   }
 
   private tickPlayer(player: GamePlayer, seconds: number, dt: number) {
-    if (player.curse && this.time >= player.curseUntil) player.curse = "";
+    if (player.curse && this.time >= player.curseUntil) {
+      player.curse = "";
+      player.contagious = false;
+    }
 
     if (!player.alive) {
       // Um pedido de bomba feito morto não vale ao renascer: a tecla apertada
@@ -633,10 +645,62 @@ export class BombGame {
       case "pierce":
         player.pierce = true;
         break;
-      case "skull": {
-        player.curse = CURSES[Math.floor(this.random() * CURSES.length)];
-        player.curseUntil = this.time + CURSE_TIME;
+      case "skull":
+        this.curse(player, CURSES[Math.floor(this.random() * CURSES.length)]);
         break;
+    }
+  }
+
+  /* ------------------------------------------------------------- maldições */
+
+  /**
+   * Amaldiçoa (a caveira, ou o painel do /mock). A troca acontece na hora e
+   * não fica; sem ninguém de pé para trocar, vira uma maldição comum. O
+   * contágio sorteia uma das que ficam e a deixa contagiosa.
+   */
+  curse(player: GamePlayer, kind: Curse) {
+    if (kind === "swap") {
+      if (this.swap(player)) return;
+      kind = this.drawLasting();
+    }
+    player.contagious = kind === "plague";
+    player.curse = kind === "plague" ? this.drawLasting() : kind;
+    player.curseUntil = this.time + CURSE_TIME;
+  }
+
+  private drawLasting(): Curse {
+    return LASTING_CURSES[Math.floor(this.random() * LASTING_CURSES.length)];
+  }
+
+  /** A troca: o amaldiçoado e um adversário de pé, sorteado, trocam de lugar. */
+  private swap(player: GamePlayer): boolean {
+    const others = this.players.filter((p) => p !== player && p.alive);
+    if (others.length === 0) return false;
+    const other = others[Math.floor(this.random() * others.length)];
+    [player.x, other.x] = [other.x, player.x];
+    [player.y, other.y] = [other.y, player.y];
+    [player.dir, other.dir] = [other.dir, player.dir];
+    // Caiu em cima de uma bomba: sai dela andando, como quem a soltou.
+    for (const bomb of this.bombs) {
+      for (const p of [player, other]) if (touches(p, bomb.cx, bomb.cy)) bomb.passers.add(p.id);
+    }
+    this.say(`${player.name} trocou de lugar com ${other.name}.`);
+    this.pickUp(other);
+    this.pickUp(player);
+    return true;
+  }
+
+  /** O contágio: quem encosta num contagioso pega a mesma maldição, contagiosa também, pelo tempo inteiro. */
+  private spread() {
+    const sick = this.players.filter((p) => p.alive && p.contagious && p.curse);
+    for (const from of sick) {
+      for (const to of this.players) {
+        if (to === from || !to.alive || (to.contagious && to.curse === from.curse)) continue;
+        if (Math.abs(to.x - from.x) >= CONTACT || Math.abs(to.y - from.y) >= CONTACT) continue;
+        to.curse = from.curse;
+        to.curseUntil = this.time + CURSE_TIME;
+        to.contagious = true;
+        this.say(`${from.name} passou a maldição para ${to.name}.`);
       }
     }
   }
@@ -780,6 +844,7 @@ export class BombGame {
     player.queue.discard();
     player.lives -= 1;
     player.curse = "";
+    player.contagious = false;
     // A morte leva o chute e a perfurante; fogo, bombas e bota ficam.
     player.kick = false;
     player.pierce = false;
