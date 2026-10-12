@@ -11,7 +11,7 @@ type Props = {
 };
 
 /**
- * O tempo da rodada, na sala de espera: 3, 5, 7 ou 10 minutos, no estilo das
+ * O tempo da rodada, na sala de espera: 2, 4 ou 6 minutos, no estilo das
  * abas de tamanho da arena. Um tempo curto demais para a arena escolhida fica
  * apagado; a escolha é do host e chega pelo estado da sala.
  */
@@ -23,7 +23,7 @@ export function TimePicker({ minutes, size, canChoose, onChoose }: Props) {
         <p className="px-label">Tempo da rodada</p>
         {min > MATCH_MINUTES[0] && <p className="px-label">mínimo {min} na grande</p>}
       </div>
-      <div role="radiogroup" aria-label="Tempo da rodada" className="grid grid-cols-4 gap-2">
+      <div role="radiogroup" aria-label="Tempo da rodada" className="grid grid-cols-3 gap-2">
         {MATCH_MINUTES.map((option) => (
           <button
             key={option}

@@ -103,45 +103,45 @@ describe("a arena", () => {
 });
 
 describe("o tempo da rodada", () => {
-  it("nasce com 5 minutos, e a rodada começa com esse tempo", () => {
+  it("nasce com 4 minutos, e a rodada começa com esse tempo", () => {
     const game = new BombGame(() => 0.99, ARENA);
     expect(game.matchMinutes).toBe(DEFAULT_MATCH_MINUTES);
-    expect(DEFAULT_MATCH_MINUTES).toBe(5);
+    expect(DEFAULT_MATCH_MINUTES).toBe(4);
     game.addPlayer("p0", "k0", "P0");
     game.addPlayer("p1", "k1", "P1");
     game.start();
-    expect(game.timeLeft).toBe(5 * 60_000);
+    expect(game.timeLeft).toBe(4 * 60_000);
   });
 
-  it("o host escolhe entre 3, 5, 7 e 10; fora disso, ou com a rodada em curso, é recusado", () => {
-    expect([...MATCH_MINUTES]).toEqual([3, 5, 7, 10]);
+  it("o host escolhe entre 2, 4 e 6; fora disso, ou com a rodada em curso, é recusado", () => {
+    expect([...MATCH_MINUTES]).toEqual([2, 4, 6]);
     const running = open(2, () => 0.99, ARENA);
-    expect(() => running.setMatchMinutes(7)).toThrow(/começou/);
+    expect(() => running.setMatchMinutes(6)).toThrow(/começou/);
     const game = new BombGame(() => 0.99, ARENA);
     game.addPlayer("p0", "k0", "P0");
     game.addPlayer("p1", "k1", "P1");
-    game.setMatchMinutes(7);
-    expect(game.matchMinutes).toBe(7);
-    expect(() => game.setMatchMinutes(4)).toThrow(/tempo/);
-    expect(game.matchMinutes).toBe(7);
+    game.setMatchMinutes(6);
+    expect(game.matchMinutes).toBe(6);
+    expect(() => game.setMatchMinutes(5)).toThrow(/tempo/);
+    expect(game.matchMinutes).toBe(6);
     game.start();
-    expect(game.timeLeft).toBe(7 * 60_000);
+    expect(game.timeLeft).toBe(6 * 60_000);
   });
 
-  it("na arena grande o mínimo é 5: o 3 é recusado, e trocar para a grande corrige o 3", () => {
-    expect(minMinutesFor("small")).toBe(3);
-    expect(minMinutesFor("medium")).toBe(3);
-    expect(minMinutesFor("large")).toBe(5);
+  it("na arena grande o mínimo é 4: o 2 é recusado, e trocar para a grande corrige o 2", () => {
+    expect(minMinutesFor("small")).toBe(2);
+    expect(minMinutesFor("medium")).toBe(2);
+    expect(minMinutesFor("large")).toBe(4);
     const game = new BombGame(() => 0.99, arenaById("small-open")!);
-    game.setMatchMinutes(3);
-    expect(game.matchMinutes).toBe(3);
+    game.setMatchMinutes(2);
+    expect(game.matchMinutes).toBe(2);
     game.setArena(ARENA);
-    expect(game.matchMinutes).toBe(5);
-    expect(() => game.setMatchMinutes(3)).toThrow(/grande/);
+    expect(game.matchMinutes).toBe(4);
+    expect(() => game.setMatchMinutes(2)).toThrow(/grande/);
     game.setArena(arenaById("medium-grid")!);
-    expect(game.matchMinutes).toBe(5);
-    game.setMatchMinutes(3);
-    expect(game.matchMinutes).toBe(3);
+    expect(game.matchMinutes).toBe(4);
+    game.setMatchMinutes(2);
+    expect(game.matchMinutes).toBe(2);
   });
 });
 

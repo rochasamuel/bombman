@@ -161,39 +161,39 @@ describe("a sala", () => {
 
   it("o host escolhe o tempo da rodada, com o mínimo da arena, e a sala abre com o pedido", async () => {
     const { room, clients } = await seated(2);
-    expect(room.state.matchMinutes).toBe(5);
+    expect(room.state.matchMinutes).toBe(4);
 
-    clients[1].send("time", { minutes: 7 });
+    clients[1].send("time", { minutes: 6 });
     await clients[1].waitForMessage("error", 1000);
-    expect(room.state.matchMinutes).toBe(5);
-    // Na grande, 3 é pouco.
-    clients[0].send("time", { minutes: 3 });
+    expect(room.state.matchMinutes).toBe(4);
+    // Na grande, 2 é pouco.
+    clients[0].send("time", { minutes: 2 });
     await clients[0].waitForMessage("error", 1000);
-    clients[0].send("time", { minutes: 4 });
+    clients[0].send("time", { minutes: 5 });
     await clients[0].waitForMessage("error", 1000);
-    expect(room.state.matchMinutes).toBe(5);
+    expect(room.state.matchMinutes).toBe(4);
 
-    clients[0].send("time", { minutes: 7 });
+    clients[0].send("time", { minutes: 6 });
     await room.waitForNextPatch();
-    expect(room.state.matchMinutes).toBe(7);
+    expect(room.state.matchMinutes).toBe(6);
 
     clients[0].send("arena", { size: "small" });
     await room.waitForNextPatch();
-    clients[0].send("time", { minutes: 3 });
+    clients[0].send("time", { minutes: 2 });
     await room.waitForNextPatch();
-    expect(room.state.matchMinutes).toBe(3);
-    // De volta à grande, o 3 sobe para 5 sozinho.
+    expect(room.state.matchMinutes).toBe(2);
+    // De volta à grande, o 2 sobe para 4 sozinho.
     clients[0].send("arena", { size: "large" });
     await room.waitForNextPatch();
     await room.waitForNextPatch();
-    expect(room.state.matchMinutes).toBe(5);
+    expect(room.state.matchMinutes).toBe(4);
 
-    const ten = await colyseus.createRoom<ArenaRoom>("arena", { roomName: "Arena", minutes: 10 });
-    expect(ten.state.matchMinutes).toBe(10);
-    const odd = await colyseus.createRoom<ArenaRoom>("arena", { roomName: "Arena", minutes: 4 });
-    expect(odd.state.matchMinutes).toBe(5);
-    const small = await colyseus.createRoom<ArenaRoom>("arena", { roomName: "Arena", arenaId: "small-open", minutes: 3 });
-    expect(small.state.matchMinutes).toBe(3);
+    const six = await colyseus.createRoom<ArenaRoom>("arena", { roomName: "Arena", minutes: 6 });
+    expect(six.state.matchMinutes).toBe(6);
+    const odd = await colyseus.createRoom<ArenaRoom>("arena", { roomName: "Arena", minutes: 5 });
+    expect(odd.state.matchMinutes).toBe(4);
+    const small = await colyseus.createRoom<ArenaRoom>("arena", { roomName: "Arena", arenaId: "small-open", minutes: 2 });
+    expect(small.state.matchMinutes).toBe(2);
   });
 
   it("abre com o tema da referência, e o host troca por outro, que vai para todos", async () => {

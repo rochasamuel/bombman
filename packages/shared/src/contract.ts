@@ -39,14 +39,14 @@ export const DEFAULT_MAX_PLAYERS = 4;
 export const LIVES = 3;
 
 /** Os tempos de rodada que o host pode escolher, em minutos. */
-export const MATCH_MINUTES = [3, 5, 7, 10] as const;
+export const MATCH_MINUTES = [2, 4, 6] as const;
 export type MatchMinutes = (typeof MATCH_MINUTES)[number];
 export const isMatchMinutes = (value: unknown): value is MatchMinutes =>
   MATCH_MINUTES.includes(value as MatchMinutes);
-/** O tempo com que uma sala nasce: a arena padrão é a grande, e nela 3 é pouco. */
-export const DEFAULT_MATCH_MINUTES: MatchMinutes = 5;
+/** O tempo com que uma sala nasce: a arena padrão é a grande, e nela 2 é pouco. */
+export const DEFAULT_MATCH_MINUTES: MatchMinutes = 4;
 /** O menor tempo que cabe num tamanho de arena: a grande leva mais tempo para percorrer. */
-export const minMinutesFor = (size: ArenaSize): MatchMinutes => (size === "large" ? 5 : 3);
+export const minMinutesFor = (size: ArenaSize): MatchMinutes => (size === "large" ? 4 : 2);
 /** Quanto dura uma rodada no tempo padrão, em ms. O relógio do painel conta daqui para baixo. */
 export const MATCH_TIME = DEFAULT_MATCH_MINUTES * 60_000;
 
