@@ -42,6 +42,8 @@ export type RoomActions = {
   input: (dx: number, dy: number) => void;
   /** Uma bomba, no próximo passo fixo. */
   bomb: () => void;
+  /** Detona a remota mais antiga (o controle remoto), no próximo passo fixo. */
+  detonate: () => void;
   emote: (emote: Emote) => void;
   restart: () => void;
 };
@@ -138,7 +140,7 @@ export function useRoomConnection(code: string): RoomConnection {
           snapshot.log.at(-1),
           ...snapshot.players.map(
             (p) =>
-              `${p.id}${p.name}${p.connected}${p.lives}${p.alive}${p.range}${p.bombs}${p.speed}${p.curse}${p.wins}`,
+              `${p.id}${p.name}${p.connected}${p.lives}${p.alive}${p.range}${p.bombs}${p.speed}${p.kick}${p.pierce}${p.curse}${p.ghost}${p.remote}${p.wins}`,
           ),
         ].join("|");
         if (next === signature) return;
@@ -304,6 +306,7 @@ export function useRoomConnection(code: string): RoomConnection {
       theme: (themeId) => roomRef.current?.send("theme", { themeId } satisfies ThemeMessage),
       input: (dx, dy) => local.setDirection(dx, dy),
       bomb: () => local.requestBomb(),
+      detonate: () => local.requestDetonate(),
       emote: (emote) => roomRef.current?.send("emote", { emote } satisfies EmoteMessage),
       restart: () => roomRef.current?.send("restart"),
     }),

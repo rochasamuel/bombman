@@ -1,6 +1,9 @@
 import {
   BASE_SPEED,
   GHOST_TIME,
+  BOMB_FUSE,
+  REMOTE_ARM_MS,
+  REMOTE_BACKUP,
   bombFuse,
   bombLimit,
   BRICK,
@@ -99,6 +102,8 @@ export type GamePlayer = {
   curseUntil: number;
   /** Até quando está invisível (o item), no relógio do motor. */
   ghostUntil: number;
+  /** Tem o controle remoto (morrer leva). */
+  remote: boolean;
   wins: number;
   input: { dx: number; dy: number };
   /**
@@ -112,6 +117,8 @@ export type GamePlayer = {
   movingUntil: number;
   /** Um pedido de bomba, consumido no tick seguinte. */
   wantsBomb: boolean;
+  /** Pediu para detonar fora dos comandos (o /mock e os testes; ver `requestDetonate`). */
+  wantsDetonate: boolean;
   /** A célula em que a tela de quem joga desenhou a bomba (ver `requestBomb`). */
   bombAt?: { cx: number; cy: number } | null;
 };
@@ -131,6 +138,10 @@ export type Bomb = {
   range: number;
   /** A explosão atravessa tijolos e bombas (só muralha e pilar a param). */
   pierce: boolean;
+  /** Do controle remoto: espera o dono detonar (ou o pavio reserva). */
+  remote: boolean;
+  /** Detonada: pisca até `explodeAt`. */
+  armed: boolean;
   /** Para onde desliza, depois de um chute; nulo parada. */
   sliding: { dx: number; dy: number } | null;
   /** Quem estava em cima quando ela nasceu, e ainda não saiu de cima. */
@@ -146,8 +157,8 @@ const MOVING_HOLD_MS = 4 * TICK_MS;
 
 /** Chance de um bloco destruído deixar um item. */
 const DROP_CHANCE = 0.38;
-/** Os pesos dos itens, na ordem de `POWERUPS`: fogo, bomba, bota, chute, perfurante, caveira, troca, invisível. Chute, perfurante, troca e invisível são raros. */
-const DROP_WEIGHTS = [36, 34, 20, 6, 4, 10, 4, 4];
+/** Os pesos dos itens, na ordem de `POWERUPS`: fogo, bomba, bota, chute, perfurante, caveira, troca, invisível, controle remoto. Chute, perfurante, troca, invisível e controle remoto são raros. */
+const DROP_WEIGHTS = [36, 34, 20, 6, 4, 10, 4, 4, 4];
 
 /**
  * Maior fatia de tempo que um passo da simulação aceita. Com a bota no máximo
@@ -295,12 +306,14 @@ export class BombGame {
       curse: "",
       curseUntil: 0,
       ghostUntil: 0,
+      remote: false,
       wins: 0,
       input: { dx: 0, dy: 0 },
       queue: new InputQueue(this.inputLimits),
       driven: false,
       movingUntil: 0,
       wantsBomb: false,
+      wantsDetonate: false,
     };
     this.players.push(player);
     this.say(`${name} entrou na arena.`);
@@ -364,9 +377,11 @@ export class BombGame {
         curse: "",
         curseUntil: 0,
         ghostUntil: 0,
+        remote: false,
         input: { dx: 0, dy: 0 },
         movingUntil: 0,
         wantsBomb: false,
+        wantsDetonate: false,
       });
       player.queue.discard();
     }
@@ -428,6 +443,12 @@ export class BombGame {
     player.bombAt = ok ? { cx: at.cx, cy: at.cy } : null;
   }
 
+  /** Pede a detonação da remota mais antiga (o caminho sem comandos: o /mock). */
+  requestDetonate(id: string) {
+    const player = this.players.find((p) => p.id === id);
+    if (player) player.wantsDetonate = true;
+  }
+
   /* --------------------------------------------------------------- o tick */
 
   /**
@@ -454,6 +475,7 @@ export class BombGame {
       // Apertar bomba no "3, 2, 1" não guarda uma bomba para o "valendo"; andar, idem.
       for (const player of this.players) {
         player.wantsBomb = false;
+        player.wantsDetonate = false;
         player.queue.discard();
       }
       if (this.time >= this.countdownUntil) {
@@ -489,6 +511,7 @@ export class BombGame {
       // no susto poria uma bomba no canto no exato instante da volta. Os
       // comandos de andar, idem: são confirmados e jogados fora.
       player.wantsBomb = false;
+      player.wantsDetonate = false;
       player.queue.discard();
       if (player.respawnAt && this.time >= player.respawnAt) this.respawn(player);
       return;
@@ -499,6 +522,10 @@ export class BombGame {
       player.wantsBomb = false;
       this.placeBomb(player, player.bombAt);
       player.bombAt = null;
+    }
+    if (player.wantsDetonate) {
+      player.wantsDetonate = false;
+      this.detonate(player);
     }
 
     if (player.driven) {
@@ -521,6 +548,7 @@ export class BombGame {
     for (const cmd of player.queue.take(dt / TICK_MS)) {
       if (!player.alive) break;
       if (cmd.bomb) this.placeBomb(player);
+      if (cmd.detonate) this.detonate(player);
       const { dx, dy } = cursedInput(player.curse, cmd.dx, cmd.dy, player.dir);
       if (dx === 0 && dy === 0) continue;
       player.movingUntil = this.time + MOVING_HOLD_MS;
@@ -652,6 +680,9 @@ export class BombGame {
       case "ghost":
         player.ghostUntil = this.time + GHOST_TIME;
         break;
+      case "remote":
+        player.remote = true;
+        break;
     }
   }
 
@@ -713,7 +744,11 @@ export class BombGame {
     for (const other of this.players) {
       if (other.alive && touches(other, cx, cy)) passers.add(other.id);
     }
-    const fuse = bombFuse(player.curse);
+    // As maldições do pavio e a diarreia ganham do controle remoto: senão a
+    // diarreia viraria um arsenal de remotas.
+    const remote =
+      player.remote && player.curse !== "shortfuse" && player.curse !== "longfuse" && player.curse !== "diarrhea";
+    const fuse = remote ? REMOTE_BACKUP : bombFuse(player.curse);
     this.bombs.push({
       id: `b${this.nextBombId++}`,
       cx,
@@ -725,6 +760,8 @@ export class BombGame {
       fuse,
       range: player.curse === "weak" ? 1 : player.range,
       pierce: player.pierce,
+      remote,
+      armed: false,
       sliding: null,
       passers,
     });
@@ -732,8 +769,24 @@ export class BombGame {
     return true;
   }
 
+  /** O controle remoto: a remota mais antiga do jogador que ainda não pisca começa a piscar. */
+  private detonate(player: GamePlayer) {
+    const bomb = this.bombs.find((b) => b.owner === player.id && b.remote && !b.armed);
+    if (bomb) this.arm(bomb);
+  }
+
+  /** A remota pisca `REMOTE_ARM_MS` e explode. */
+  private arm(bomb: Bomb) {
+    bomb.armed = true;
+    bomb.explodeAt = Math.min(bomb.explodeAt, this.time + REMOTE_ARM_MS);
+  }
+
   private tickBombs(seconds: number) {
-    for (const bomb of this.bombs) this.slideBomb(bomb, seconds);
+    for (const bomb of this.bombs) {
+      this.slideBomb(bomb, seconds);
+      // O pavio reserva acabando: ela pisca antes, como se detonada.
+      if (bomb.remote && !bomb.armed && this.time >= bomb.explodeAt - REMOTE_ARM_MS) this.arm(bomb);
+    }
     // Uma de cada vez, e sempre a partir da lista viva: uma explosão pode
     // detonar outra, e a outra entra na mesma volta.
     for (;;) {
@@ -834,6 +887,16 @@ export class BombGame {
     player.lives -= 1;
     player.curse = "";
     player.ghostUntil = 0;
+    // Sem dono vivo, a remota que ainda espera vira uma bomba comum, com o pavio inteiro.
+    if (player.remote) {
+      player.remote = false;
+      for (const bomb of this.bombs) {
+        if (bomb.owner !== player.id || !bomb.remote || bomb.armed) continue;
+        bomb.remote = false;
+        bomb.fuse = BOMB_FUSE;
+        bomb.explodeAt = this.time + BOMB_FUSE;
+      }
+    }
     // A morte leva o chute e a perfurante; fogo, bombas e bota ficam.
     player.kick = false;
     player.pierce = false;
@@ -897,6 +960,7 @@ export class BombGame {
       player.moving = false;
       player.movingUntil = 0;
       player.wantsBomb = false;
+      player.wantsDetonate = false;
       player.queue.discard();
     }
     this.fx.push({ k: "finish", winner: this.winnerId });

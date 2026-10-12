@@ -148,6 +148,7 @@ export class Predictor {
     dy: number,
     bomb: boolean,
     now: number,
+    detonate = false,
   ): { cmd: MoveCommand; placed: boolean } | null {
     const me = this.me(state, meId);
     if (!me) {
@@ -161,9 +162,10 @@ export class Predictor {
     // O sem freio anda sem dedo: o comando parado também vai, e o motor o vira em passo.
     const walk = cursedInput(me.curse, dx, dy, walker.dir);
     this.moving = walk.dx !== 0 || walk.dy !== 0;
-    if (!this.moving && !bomb) return null;
+    if (!this.moving && !bomb && !detonate) return null;
 
     const cmd: MoveCommand = { seq: ++this.seq, dx, dy, bomb };
+    if (detonate) cmd.detonate = true;
     let placed = false;
     if (bomb && this.canPlace(state, me, walker)) {
       this.ghosts.push({ seq: cmd.seq, cx: Math.floor(walker.x), cy: Math.floor(walker.y), at: now });

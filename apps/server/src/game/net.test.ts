@@ -67,11 +67,25 @@ describe("o lote de comandos", () => {
     expect(decodeBatch(JSON.parse(JSON.stringify(batch)))).toEqual(cmds);
   });
 
+  it("a detonação vai e volta, sozinha ou junto com a bomba", () => {
+    const cmds: MoveCommand[] = [
+      { seq: 3, dx: 1, dy: 0, bomb: false },
+      { seq: 4, dx: 1, dy: 0, bomb: false, detonate: true },
+      { seq: 5, dx: 0, dy: 0, bomb: true, detonate: true },
+      { seq: 6, dx: 1, dy: 0, bomb: false },
+    ];
+    const batch = encodeBatch(cmds)!;
+    expect(batch.runs.map(([, count]) => count)).toEqual([1, 1, 1, 1]);
+    expect(decodeBatch(JSON.parse(JSON.stringify(batch)))).toEqual(cmds);
+  });
+
   it("recusa o que não é lote, ou passa dos limites", () => {
     expect(decodeBatch(undefined)).toBeNull();
     expect(decodeBatch({ seq: 1 })).toBeNull();
     expect(decodeBatch({ seq: -1, runs: [[4, 1]] })).toBeNull();
-    expect(decodeBatch({ seq: 1, runs: [[18, 1]] })).toBeNull();
+    expect(decodeBatch({ seq: 1, runs: [[36, 1]] })).toBeNull();
+    // A detonação também é evento: nunca num trecho.
+    expect(decodeBatch({ seq: 1, runs: [[22, 2]] })).toBeNull();
     expect(decodeBatch({ seq: 1, runs: [[4, "2"]] })).toBeNull();
     expect(decodeBatch({ seq: 1, runs: [[13, 2]] })).toBeNull();
     expect(decodeBatch({ seq: 1, runs: [[4, 30], [5, 30], [4, 1]] })).toBeNull();

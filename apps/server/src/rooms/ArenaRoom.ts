@@ -482,6 +482,7 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
       entry.invulnerable = player.alive && game.time < player.invulnerableUntil;
       entry.curse = player.curse;
       entry.ghost = player.alive && game.time < player.ghostUntil;
+      entry.remote = player.remote;
       entry.wins = player.wins;
     });
     return moved;
@@ -515,6 +516,10 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
         }
         const passers = this.passersMask(bomb.passers);
         if (entry.passers !== passers) entry.passers = passers;
+        // A remota detonada passa a piscar; a do dono que morreu vira comum, com o pavio inteiro.
+        if (entry.remote !== bomb.remote) entry.remote = bomb.remote;
+        if (entry.armed !== bomb.armed) entry.armed = bomb.armed;
+        if (entry.fuse !== bomb.fuse) entry.fuse = bomb.fuse;
       });
       return moved;
     }
@@ -529,6 +534,8 @@ export class ArenaRoom extends Room<{ state: ArenaRoomState }> {
       entry.owner = bomb.owner;
       entry.pierce = bomb.pierce;
       entry.fuse = bomb.fuse;
+      entry.remote = bomb.remote;
+      entry.armed = bomb.armed;
       entry.passers = this.passersMask(bomb.passers);
       state.bombs.push(entry);
     }

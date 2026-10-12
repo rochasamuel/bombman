@@ -32,6 +32,7 @@ export class PlayerState extends Schema {
   @type("boolean") invulnerable = false;
   @type("string") curse = "";
   @type("boolean") ghost = false;
+  @type("boolean") remote = false;
   @type("uint8") wins = 0;
   /** O último comando de entrada aplicado: a tela descarta até ele e reaplica o resto. */
   @type("uint32") seq = 0;
@@ -48,6 +49,10 @@ export class BombState extends Schema {
   @type("boolean") pierce = false;
   /** O pavio, em ms: a tela escolhe o quadro da bomba por ele. */
   @type("uint16") fuse = 0;
+  /** Do controle remoto: espera a detonação. Vira `false` se o dono morre (pavio comum). */
+  @type("boolean") remote = false;
+  /** A remota detonada, piscando para explodir. */
+  @type("boolean") armed = false;
   /** Quem ainda passa por ela, por `slot` (1 << slot): a previsão da tela precisa saber se ela fecha. */
   @type("uint8") passers = 0;
 }

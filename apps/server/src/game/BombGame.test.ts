@@ -4,6 +4,8 @@ import {
   BRICK,
   COUNTDOWN,
   CURSE_TIME,
+  REMOTE_ARM_MS,
+  REMOTE_BACKUP,
   GHOST_TIME,
   DEFAULT_MATCH_MINUTES,
   EMPTY_ARENA,
@@ -16,6 +18,7 @@ import {
   MATCH_MINUTES,
   MAX_SPEED_LEVEL,
   RIGHT,
+  TICK_MS,
   WALL,
   arenaById,
   defineArena,
@@ -779,5 +782,94 @@ describe("os itens da troca e da invisibilidade", () => {
     game.tick(16);
     expect(b.ghostUntil).toBe(0);
     expect(a.curse).toBe("");
+  });
+});
+
+describe("o controle remoto", () => {
+  /** O primeiro jogador com o controle remoto e duas bombas. */
+  function remote() {
+    const game = open();
+    const [p] = game.players;
+    game.apply(p, "remote");
+    p.bombs = 2;
+    return { game, p };
+  }
+
+  it("a bomba espera a detonação, muito além do pavio comum", () => {
+    const { game, p } = remote();
+    game.requestBomb(p.id);
+    game.tick(16);
+    expect(game.bombs[0]).toMatchObject({ remote: true, armed: false });
+    run(game, BOMB_FUSE * 2);
+    expect(game.bombs).toHaveLength(1);
+  });
+
+  it("detonar arma a mais antiga, que pisca o aviso e só então explode", () => {
+    const { game, p } = remote();
+    game.requestBomb(p.id);
+    game.tick(16);
+    // Longe o bastante para a primeira não detonar a segunda em cadeia.
+    game.setInput(p.id, 1, 0);
+    run(game, 900);
+    game.setInput(p.id, 0, 0);
+    game.requestBomb(p.id);
+    game.tick(16);
+    const [first, second] = game.bombs;
+    expect(second.cx - first.cx).toBeGreaterThan(1);
+    game.requestDetonate(p.id);
+    game.tick(16);
+    expect(first.armed).toBe(true);
+    expect(second.armed).toBe(false);
+    run(game, REMOTE_ARM_MS - 50);
+    expect(game.bombs).toContain(first);
+    run(game, 100);
+    expect(game.bombs).not.toContain(first);
+    expect(game.bombs).toContain(second);
+  });
+
+  it("detonar pelos comandos da rede faz o mesmo", () => {
+    const { game, p } = remote();
+    game.pushCommands(p.id, [{ seq: 1, dx: 0, dy: 0, bomb: true }]);
+    game.tick(TICK_MS);
+    game.pushCommands(p.id, [{ seq: 2, dx: 0, dy: 0, bomb: false, detonate: true }]);
+    game.tick(TICK_MS);
+    expect(game.bombs[0].armed).toBe(true);
+  });
+
+  it("esquecida, explode sozinha no pavio reserva, piscando antes", () => {
+    const { game, p } = remote();
+    game.requestBomb(p.id);
+    game.tick(16);
+    run(game, REMOTE_BACKUP - REMOTE_ARM_MS + 32);
+    expect(game.bombs[0].armed).toBe(true);
+    run(game, REMOTE_ARM_MS);
+    expect(game.bombs).toHaveLength(0);
+  });
+
+  it("o dono morre: perde o controle, e a remota vira comum com o pavio inteiro", () => {
+    const { game, p } = remote();
+    game.requestBomb(p.id);
+    game.tick(16);
+    game.setInput(p.id, 1, 0);
+    run(game, 600);
+    game.setInput(p.id, 0, 0);
+    const [bomb] = game.bombs;
+    game.flames.push({ cx: Math.floor(p.x), cy: 1, kind: FLAME_CENTER, until: game.time + 50, born: game.time });
+    game.tick(16);
+    expect(p.alive).toBe(false);
+    expect(p.remote).toBe(false);
+    expect(bomb).toMatchObject({ remote: false, fuse: BOMB_FUSE });
+    run(game, BOMB_FUSE + 16);
+    expect(game.bombs).not.toContain(bomb);
+  });
+
+  it("as maldições do pavio e a diarreia ganham do controle remoto", () => {
+    for (const curse of ["shortfuse", "longfuse", "diarrhea"] as const) {
+      const { game, p } = remote();
+      game.curse(p, curse);
+      game.requestBomb(p.id);
+      game.tick(16);
+      expect(game.bombs[0].remote).toBe(false);
+    }
   });
 });

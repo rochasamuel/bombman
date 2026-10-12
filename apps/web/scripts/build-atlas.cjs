@@ -12,13 +12,15 @@
  *                                <bomb-pierce-sheet.png> \
  *                                <enchanted_forest_tileset.png> <volcanic_fortress_tileset.png> \
  *                                <frozen_citadel_tileset.png> <cyberpunk_facility_tileset.png> \
- *                                <desert_temple_tileset.png> <bomb-social-items-sheet.png>
+ *                                <desert_temple_tileset.png> <bomb-social-items-sheet.png> \
+ *                                <bomb-remote-sheet.png> <bomb-remote-item-sheet.png>
  *
  * Os cinco últimos são os tilesets dos temas novos (ver `themes.cjs`): cada um
  * dá ao atlas as mesmas peças de cenário que o da referência, com o nome do
  * tema na frente (`forest_floor0`, `volcano_wall_t`…). Depois deles, a folha
  * dos itens da troca e da invisibilidade (duas colunas, quatro quadros de
- * brilho, fundo transparente).
+ * brilho, fundo transparente), e as duas do controle remoto: a bomba com
+ * antena (as fases da bomba comum) e o ícone do item.
  *
  * A folha da vitória é o boneco de frente, na escala do parado, erguendo os
  * braços (25 quadros numa grade de 5×5). O tileset do cenário dá o chão, a
@@ -78,14 +80,14 @@ const [
 /** A ordem dos tilesets dos temas na linha de comando. */
 const THEME_ORDER = ["forest", "volcano", "frozen", "cyber", "desert"];
 const themePaths = rest.slice(0, THEME_ORDER.length);
-const socialSheetPath = rest[THEME_ORDER.length];
-if (!pierceSheetPath || rest.length !== THEME_ORDER.length + 1) {
+const [socialSheetPath, remoteSheetPath, remoteItemSheetPath] = rest.slice(THEME_ORDER.length);
+if (!pierceSheetPath || rest.length !== THEME_ORDER.length + 3) {
   console.error(
     "uso: node scripts/build-atlas.cjs <arena.png> <sheet.png> <walk-down.png> <walk-up.png> <walk-side.png> " +
       "<idle-down.png> <idle-up.png> <idle-right.png> <idle-left.png> <victory-down.png> <scenario-tiles.png> " +
       "<bomb-sheet.png> <explosion-sheet.png> <items-sheet.png> <pierce-bomb-sheet.png> " +
       "<forest-tileset.png> <volcano-tileset.png> <frozen-tileset.png> <cyber-tileset.png> <desert-tileset.png> " +
-        "<social-items-sheet.png>",
+        "<social-items-sheet.png> <remote-bomb-sheet.png> <remote-item-sheet.png>",
   );
   process.exit(1);
 }
@@ -117,6 +119,8 @@ const explosionSheet = PNG.sync.read(fs.readFileSync(explosionSheetPath));
 const itemSheet = PNG.sync.read(fs.readFileSync(itemSheetPath));
 const pierceSheet = PNG.sync.read(fs.readFileSync(pierceSheetPath));
 const socialSheet = PNG.sync.read(fs.readFileSync(socialSheetPath));
+const remoteSheet = PNG.sync.read(fs.readFileSync(remoteSheetPath));
+const remoteItemSheet = PNG.sync.read(fs.readFileSync(remoteItemSheetPath));
 
 /* -------------------------------------------------------------- utilidades */
 
@@ -627,6 +631,32 @@ for (const [phase, row, first, count] of BOMB_PHASES) {
   }
 }
 
+/* A bomba remota (`bomb-remote-sheet.png`, de 2026-10-12): a mesma folha de
+ * 2048×768 e as mesmas fases da perfurante — a antena piscando o sinal no lugar
+ * do pavio, o pulso e o estouro. O fundo já é transparente (o brilho azul fica
+ * em pixels de alfa zero): basta o alfa, sem chave. A escala e o centro vêm da
+ * faixa da esfera, como na perfurante: a antena e o sinal saem do corpo. */
+const REMOTE_ROWS = [
+  [0, 270],
+  [270, 520],
+  [520, 768],
+];
+const remoteCell = (row, col) => {
+  const [y0, y1] = REMOTE_ROWS[row];
+  const img = crop(remoteSheet, col * 256, y0, 256, y1 - y0);
+  for (let i = 3; i < img.data.length; i += 4) img.data[i] = img.data[i] >= 128 ? 255 : 0;
+  return trim(img);
+};
+const REMOTE_SCALE = BOMB_W / sphere(remoteCell(0, 0)).width;
+for (const [phase, row, first, count] of BOMB_PHASES) {
+  for (let i = 0; i < count; i++) {
+    const img = scaleBy(remoteCell(row, first + i), REMOTE_SCALE);
+    const out = blank(TILE, BOMB_H);
+    paste(out, img, Math.round(TILE / 2 - sphere(img).center), BOMB_H - img.height);
+    add(`remote_${phase}${i}`, out);
+  }
+}
+
 /* A explosão modular: uma coluna por peça (o centro, o braço horizontal, o
  * vertical, as pontas esquerda, direita, de cima e de baixo; as duas últimas
  * colunas da folha são enfeites que não entram) e uma linha por quadro. A
@@ -783,6 +813,18 @@ for (const [kind, col] of Object.entries(SOCIAL_ITEMS)) {
   const [x0, x1] = SOCIAL_COLS[col];
   addItem(kind, SOCIAL_ROWS.map(([y0, y1]) => crop(socialSheet, x0, y0, x1 - x0, y1 - y0)));
 }
+
+/* O controle remoto (`bomb-remote-item-sheet.png`): uma coluna, quatro quadros, fundo transparente. */
+const REMOTE_ITEM_ROWS = [
+  [90, 540],
+  [540, 992],
+  [992, 1445],
+  [1445, 1900],
+];
+addItem(
+  "remote",
+  REMOTE_ITEM_ROWS.map(([y0, y1]) => crop(remoteItemSheet, 140, y0, 513, y1 - y0)),
+);
 
 /** Um item: os quatro quadros pelo mesmo retângulo (a união deles), numa escala só. */
 function addItem(kind, cells) {

@@ -20,12 +20,15 @@ import { FLOOR, cellIndex } from "./contract.js";
 export const TICK_HZ = 60;
 export const TICK_MS = 1000 / TICK_HZ;
 
-/** Um passo de entrada: a direção (cada eixo -1, 0 ou 1) e se põe bomba antes de andar. */
-export type MoveCommand = { seq: number; dx: number; dy: number; bomb: boolean };
+/**
+ * Um passo de entrada: a direção (cada eixo -1, 0 ou 1), se põe bomba antes
+ * de andar e se detona a bomba remota mais antiga (o controle remoto).
+ */
+export type MoveCommand = { seq: number; dx: number; dy: number; bomb: boolean; detonate?: boolean };
 
 /**
  * cliente -> servidor: comandos consecutivos, a partir de `seq`, em trechos
- * `[código, quantos]`. O código junta a direção e a bomba (`commandCode`).
+ * `[código, quantos]`. O código junta a direção, a bomba e a detonação (`commandCode`).
  * Segurar uma direção por dois passos é um trecho só.
  */
 export type InputBatch = { seq: number; runs: Array<[number, number]> };
@@ -37,23 +40,29 @@ export const MAX_BATCH_COMMANDS = 60;
 /** O maior `seq` aceito: cabe no `uint32` do estado com folga. */
 export const MAX_SEQ = 2 ** 31 - 1;
 
-export function commandCode(dx: number, dy: number, bomb: boolean): number {
-  return dx + 1 + 3 * (dy + 1) + (bomb ? 9 : 0);
+/** De 0 a 8, a direção; mais 9, a bomba; mais 18, a detonação. Do 9 em diante é evento. */
+export function commandCode(dx: number, dy: number, bomb: boolean, detonate = false): number {
+  return dx + 1 + 3 * (dy + 1) + (bomb ? 9 : 0) + (detonate ? 18 : 0);
 }
 
 export function decodeCommand(seq: number, code: number): MoveCommand {
-  return { seq, dx: (code % 3) - 1, dy: (Math.floor(code / 3) % 3) - 1, bomb: code >= 9 };
+  const cmd: MoveCommand = { seq, dx: (code % 3) - 1, dy: (Math.floor(code / 3) % 3) - 1, bomb: code % 18 >= 9 };
+  if (code >= 18) cmd.detonate = true;
+  return cmd;
 }
+
+/** O comando é um evento (bomba ou detonação): vai sozinho, nunca num trecho. */
+const isEvent = (cmd: MoveCommand) => cmd.bomb || !!cmd.detonate;
 
 /** Os comandos em ordem, agrupados em trechos iguais. Os `seq` precisam ser consecutivos. */
 export function encodeBatch(commands: readonly MoveCommand[]): InputBatch | null {
   if (commands.length === 0) return null;
   const runs: Array<[number, number]> = [];
   for (const cmd of commands) {
-    const code = commandCode(cmd.dx, cmd.dy, cmd.bomb);
+    const code = commandCode(cmd.dx, cmd.dy, cmd.bomb, cmd.detonate);
     const last = runs[runs.length - 1];
-    // A bomba é um evento: nunca entra num trecho de mais de um passo.
-    if (last && last[0] === code && !cmd.bomb && last[1] < MAX_RUN_LENGTH) last[1] += 1;
+    // A bomba e a detonação são eventos: nunca entram num trecho de mais de um passo.
+    if (last && last[0] === code && !isEvent(cmd) && last[1] < MAX_RUN_LENGTH) last[1] += 1;
     else runs.push([code, 1]);
   }
   return { seq: commands[0].seq, runs };
@@ -73,7 +82,7 @@ export function decodeBatch(message: unknown): MoveCommand[] | null {
   for (const run of runs) {
     if (!Array.isArray(run) || run.length !== 2) return null;
     const [code, count] = run as unknown[];
-    if (!Number.isInteger(code) || (code as number) < 0 || (code as number) > 17) return null;
+    if (!Number.isInteger(code) || (code as number) < 0 || (code as number) > 35) return null;
     if (!Number.isInteger(count) || (count as number) < 1 || (count as number) > MAX_RUN_LENGTH) return null;
     if ((code as number) >= 9 && count !== 1) return null;
     for (let i = 0; i < (count as number); i++) {

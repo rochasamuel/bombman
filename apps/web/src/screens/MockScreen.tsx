@@ -171,6 +171,7 @@ function MockMatch({
       },
       input: (dx, dy) => game.setInput(ME, dx, dy),
       bomb: () => game.requestBomb(ME),
+      detonate: () => game.requestDetonate(ME),
       emote: (emote) => {
         for (const handler of emoteHandlers.current) handler({ by: ME, emote });
       },
@@ -203,7 +204,7 @@ function MockMatch({
     if (next) game.curse(player, next);
     else player.curse = "";
   };
-  const give = (kind: "swap" | "ghost") => {
+  const give = (kind: "swap" | "ghost" | "remote") => {
     const player = me();
     if (player) game.apply(player, kind);
   };
@@ -226,8 +227,8 @@ function MockMatch({
 
 /**
  * As maldições à mão: cada botão amaldiçoa o vermelho por `CURSE_TIME`, como
- * a caveira faria; embaixo, os itens da troca e da invisibilidade, como se
- * ele os pegasse. O botão solta o foco ao clicar: senão o espaço (a bomba)
+ * a caveira faria; embaixo, os itens da troca, da invisibilidade e do
+ * controle remoto, como se ele os pegasse. O botão solta o foco ao clicar: senão o espaço (a bomba)
  * apertaria o botão de novo.
  */
 function CursePanel({
@@ -237,7 +238,7 @@ function CursePanel({
 }: {
   active: Curse | "";
   onLay: (curse: Curse | "") => void;
-  onGive: (kind: "swap" | "ghost") => void;
+  onGive: (kind: "swap" | "ghost" | "remote") => void;
 }) {
   const press = (event: React.MouseEvent<HTMLButtonElement>, curse: Curse | "") => {
     event.currentTarget.blur();
@@ -264,7 +265,7 @@ function CursePanel({
       </div>
       <div className="mt-2 flex gap-x-3">
         <span className="px-label">itens</span>
-        {(["swap", "ghost"] as const).map((kind) => (
+        {(["swap", "ghost", "remote"] as const).map((kind) => (
           <button
             key={kind}
             type="button"
@@ -326,7 +327,7 @@ function snapshot(game: BombGame, themeId: string): ArenaState {
     matchMinutes: game.matchMinutes,
     players: game.players.map((player) => publicPlayer(game, player)),
     grid: game.grid,
-    bombs: game.bombs.map(({ id, cx, cy, x, y, owner, pierce, fuse, passers }) => ({
+    bombs: game.bombs.map(({ id, cx, cy, x, y, owner, pierce, remote, armed, fuse, passers }) => ({
       id,
       cx,
       cy,
@@ -334,6 +335,8 @@ function snapshot(game: BombGame, themeId: string): ArenaState {
       y,
       owner,
       pierce,
+      remote,
+      armed,
       fuse,
       passers: game.players.reduce((mask, p) => (passers.has(p.id) ? mask | (1 << p.slot) : mask), 0),
     })),
@@ -371,6 +374,7 @@ function publicPlayer(game: BombGame, player: GamePlayer): PublicPlayer {
     invulnerable: player.alive && game.time < player.invulnerableUntil,
     curse: player.curse,
     ghost: player.alive && game.time < player.ghostUntil,
+    remote: player.remote,
     wins: player.wins,
     seq: player.queue.ack,
   };
@@ -389,7 +393,7 @@ function signatureOf(state: ArenaState): string {
     state.log.length,
     state.log.at(-1),
     ...state.players.map(
-      (p) => `${p.id}${p.lives}${p.alive}${p.range}${p.bombs}${p.speed}${p.curse}${p.ghost}${p.wins}`,
+      (p) => `${p.id}${p.lives}${p.alive}${p.range}${p.bombs}${p.speed}${p.kick}${p.pierce}${p.curse}${p.ghost}${p.remote}${p.wins}`,
     ),
   ].join("|");
 }

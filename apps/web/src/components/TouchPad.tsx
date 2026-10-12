@@ -3,13 +3,15 @@ import type { Dir, InputControls } from "../game/useInput";
 
 /**
  * O direcional na tela, para quem joga no dedo. Quatro setas e o botão da
- * bomba, grandes o bastante para o polegar. Eventos de ponteiro, e não de
+ * bomba, grandes o bastante para o polegar; com o controle remoto, um botão
+ * menor de detonar aparece ao lado da bomba. Eventos de ponteiro, e não de
  * clique: a seta vale ENQUANTO está apertada, e o dedo pode escorregar de uma
  * para a outra sem levantar — daí capturar o ponteiro e seguir o alvo.
  */
-export function TouchPad({ controls }: { controls: InputControls }) {
+export function TouchPad({ controls, remote }: { controls: InputControls; remote: boolean }) {
   const [down, setDown] = useState<Dir | null>(null);
   const [firing, setFiring] = useState(false);
+  const [detonating, setDetonating] = useState(false);
 
   const start = (dir: Dir) => (event: React.PointerEvent) => {
     event.preventDefault();
@@ -47,6 +49,25 @@ export function TouchPad({ controls }: { controls: InputControls }) {
         {key("right", "▶", { gridColumn: 3, gridRow: 2 })}
         {key("down", "▼", { gridColumn: 2, gridRow: 3 })}
       </div>
+      <div className="flex items-end gap-3">
+      {remote && (
+        <button
+          type="button"
+          className={["bomb-fire bomb-detonate", detonating && "is-down"].filter(Boolean).join(" ")}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            setDetonating(true);
+            controls.detonate();
+          }}
+          onPointerUp={() => setDetonating(false)}
+          onPointerCancel={() => setDetonating(false)}
+          onPointerLeave={() => setDetonating(false)}
+          onContextMenu={(event) => event.preventDefault()}
+          aria-label="detonar"
+        >
+          📡
+        </button>
+      )}
       <button
         type="button"
         className={["bomb-fire", firing && "is-down"].filter(Boolean).join(" ")}
@@ -63,6 +84,7 @@ export function TouchPad({ controls }: { controls: InputControls }) {
       >
         💣
       </button>
+      </div>
     </div>
   );
 }

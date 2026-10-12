@@ -23,6 +23,8 @@ const KEYS: Record<string, Dir> = {
 };
 
 const BOMB_KEYS = new Set(["Space", "Enter", "KeyX", "KeyZ", "KeyJ", "KeyK"]);
+/** O controle remoto: detona a remota mais antiga. */
+const DETONATE_KEYS = new Set(["KeyC", "KeyL", "ShiftLeft", "ShiftRight"]);
 
 const VECTOR: Record<Dir, [number, number]> = {
   up: [0, -1],
@@ -35,6 +37,7 @@ export type InputControls = {
   press: (dir: Dir) => void;
   release: (dir: Dir) => void;
   bomb: () => void;
+  detonate: () => void;
   /** Solta tudo: a aba perdeu o foco, a rodada acabou. */
   clear: () => void;
 };
@@ -62,6 +65,7 @@ export function useInput(actions: RoomActions, enabled: boolean): InputControls 
         unlockAudio();
         actions.bomb();
       },
+      detonate: () => actions.detonate(),
       clear: () => {
         held.current = [];
         send();
@@ -86,6 +90,11 @@ export function useInput(actions: RoomActions, enabled: boolean): InputControls 
       if (BOMB_KEYS.has(event.code)) {
         event.preventDefault();
         if (!event.repeat) controls.bomb();
+        return;
+      }
+      if (DETONATE_KEYS.has(event.code)) {
+        event.preventDefault();
+        if (!event.repeat) controls.detonate();
       }
     };
     const up = (event: KeyboardEvent) => {

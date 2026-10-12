@@ -58,6 +58,7 @@ function snapshot(game: BombGame, tick: number): ArenaState {
       invulnerable: false,
       curse: p.curse,
       ghost: false,
+      remote: p.remote,
       wins: p.wins,
       seq: p.queue.ack,
     })),
@@ -71,6 +72,8 @@ function snapshot(game: BombGame, tick: number): ArenaState {
       owner: b.owner,
       pierce: b.pierce,
       fuse: b.fuse,
+      remote: b.remote,
+      armed: b.armed,
       passers: game.players.reduce((m, p) => (b.passers.has(p.id) ? m | (1 << p.slot) : m), 0),
     })),
     flames: [],
@@ -399,5 +402,25 @@ describe("a previsão com maldição de andar", () => {
     expect(commands.length).toBeGreaterThan(100);
     // Soltou o dedo por volta de x = 2,1 e seguiu até o primeiro tijolo.
     expect(game.players[0].x).toBeGreaterThan(3);
+  });
+});
+
+describe("a detonação", () => {
+  it("parado, o comando de detonar sai mesmo assim, e o motor arma a remota", () => {
+    const game = new BombGame(seeded(1));
+    game.addPlayer("me", "k", "Eu");
+    game.addPlayer("b", "k2", "B");
+    game.start();
+    game.tick(COUNTDOWN);
+    game.apply(game.players[0], "remote");
+    const p = new Predictor();
+    const placed = p.step(snapshot(game, 0), "me", 0, 0, true, 0)!;
+    game.pushCommands("me", [placed.cmd]);
+    game.tick(TICK_MS);
+    const out = p.step(snapshot(game, 1), "me", 0, 0, false, 16, true);
+    expect(out?.cmd.detonate).toBe(true);
+    game.pushCommands("me", [out!.cmd]);
+    game.tick(TICK_MS);
+    expect(game.bombs[0]).toMatchObject({ remote: true, armed: true });
   });
 });

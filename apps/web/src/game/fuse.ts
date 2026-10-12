@@ -1,4 +1,4 @@
-import { BOMB_FUSE, FLAME_TIME } from "@bomb/shared";
+import { BOMB_FUSE, FLAME_TIME, REMOTE_ARM_MS } from "@bomb/shared";
 import { BOMB_STEPS, FLAME_STEPS, POWERUP_STEPS, type BombPhase } from "../art/atlas";
 
 /*
@@ -27,6 +27,24 @@ export function bombFrame(ageMs: number, fuse: number = BOMB_FUSE): { phase: Bom
   if (ageMs >= boomAt) return { phase: "boom", step: clampStep((ageMs - boomAt) / FX_FRAME_MS, BOMB_STEPS.boom) };
   if (ageMs >= pulseAt) return { phase: "pulse", step: clampStep((ageMs - pulseAt) / FX_FRAME_MS, BOMB_STEPS.pulse) };
   return { phase: "fuse", step: Math.floor(Math.max(0, ageMs) / FX_FRAME_MS) % BOMB_STEPS.fuse };
+}
+
+/** A antena da remota piscando o sinal: um quadro a cada 100 ms, a volta inteira (o parado e os seis do sinal). */
+const REMOTE_SIGNAL_MS = 100;
+
+/**
+ * O quadro da bomba remota. Esperando, a antena dá voltas no sinal; detonada
+ * (`armedAgeMs`, desde que a tela a viu piscar), o pulso inteiro corre no
+ * aviso de `REMOTE_ARM_MS` e o estouro fecha.
+ */
+export function remoteFrame(armedAgeMs: number | null, ageMs: number): { phase: BombPhase; step: number } {
+  if (armedAgeMs === null) {
+    const i = Math.floor(Math.max(0, ageMs) / REMOTE_SIGNAL_MS) % (BOMB_STEPS.fuse + 1);
+    return i === 0 ? { phase: "idle", step: 0 } : { phase: "fuse", step: i - 1 };
+  }
+  const boomAt = REMOTE_ARM_MS - BOMB_BOOM_MS;
+  if (armedAgeMs >= boomAt) return { phase: "boom", step: clampStep((armedAgeMs - boomAt) / FX_FRAME_MS, BOMB_STEPS.boom) };
+  return { phase: "pulse", step: clampStep(armedAgeMs / (boomAt / BOMB_STEPS.pulse), BOMB_STEPS.pulse) };
 }
 
 /** O quadro da chama: os oito espalhados pela vida dela, parando no último. */

@@ -199,6 +199,8 @@ describe("o atlas", () => {
     expect(names).toContain("pierce_fuse5");
     expect(names).toContain("pierce_pulse7");
     expect(names).toContain("pierce_boom1");
+    // A remota, com antena: as mesmas fases.
+    for (const name of ["remote_idle0", "remote_fuse5", "remote_pulse7", "remote_boom1"]) expect(names).toContain(name);
     // A explosão: as sete peças em oito quadros sincronizados; o tremeluzir `_alt` acabou.
     for (const piece of ["center", "h", "v", "l", "r", "u", "d"]) {
       for (let i = 0; i < FLAME_STEPS; i++) expect(names).toContain(`flame_${piece}${i}`);
@@ -207,7 +209,7 @@ describe("o atlas", () => {
     expect(names).not.toContain("flame_center_alt");
     expect(names).not.toContain("flame_center");
     // Os itens: quatro quadros cada, a troca e a invisibilidade (folha própria) inclusive.
-    for (const kind of ["fire", "bomb", "boot", "kick", "pierce", "skull", "swap", "ghost"]) {
+    for (const kind of ["fire", "bomb", "boot", "kick", "pierce", "skull", "swap", "ghost", "remote"]) {
       for (let i = 0; i < POWERUP_STEPS; i++) expect(names).toContain(`pu_${kind}${i}`);
     }
     expect(POWERUP_STEPS).toBe(4);

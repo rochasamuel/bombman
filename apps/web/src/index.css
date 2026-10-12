@@ -584,6 +584,16 @@ body {
   user-select: none;
   -webkit-user-select: none;
 }
+/* O detonador do controle remoto: menor, ao lado da bomba. */
+.bomb-detonate {
+  width: 60px;
+  height: 60px;
+  font-size: 22px;
+  background: var(--slab);
+  box-shadow:
+    var(--bevel),
+    var(--drop);
+}
 .bomb-fire.is-down {
   transform: translate(2px, 2px);
   box-shadow:

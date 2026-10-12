@@ -89,7 +89,7 @@ export type Direction = typeof DOWN | typeof LEFT | typeof RIGHT | typeof UP;
 
 /* ---------------------------------------------------------------- itens */
 
-export const POWERUPS = ["fire", "bomb", "boot", "kick", "pierce", "skull", "swap", "ghost"] as const;
+export const POWERUPS = ["fire", "bomb", "boot", "kick", "pierce", "skull", "swap", "ghost", "remote"] as const;
 export type Powerup = (typeof POWERUPS)[number];
 
 export const POWERUP_NAME: Record<Powerup, string> = {
@@ -101,7 +101,18 @@ export const POWERUP_NAME: Record<Powerup, string> = {
   skull: "caveira",
   swap: "troca",
   ghost: "invisível",
+  remote: "controle remoto",
 };
+
+/**
+ * O controle remoto. A bomba dele não tem pavio: espera o dono detonar (a
+ * mais antiga primeiro, uma por vez). Detonada, pisca `REMOTE_ARM_MS` em todas
+ * as telas e só então explode — o aviso cobre o ping de quase todo mundo, e
+ * ninguém morre de uma bomba que não viu piscar. Esquecida, explode sozinha
+ * depois de `REMOTE_BACKUP` (piscando antes, do mesmo jeito).
+ */
+export const REMOTE_ARM_MS = 300;
+export const REMOTE_BACKUP = 10_000;
 
 /** Quanto tempo o item da invisibilidade dura. */
 export const GHOST_TIME = 10_000;
@@ -217,6 +228,8 @@ export type PublicPlayer = {
   curse: Curse | "";
   /** Com o item da invisibilidade: os outros não o veem (só num lampejo). */
   ghost: boolean;
+  /** Tem o controle remoto: as bombas dele esperam a detonação. */
+  remote: boolean;
   /** Rodadas vencidas nesta sala. */
   wins: number;
   /** O último comando de entrada que o servidor aplicou para este jogador (ver `net.ts`). */
@@ -233,6 +246,10 @@ export type PublicBomb = {
   y: number;
   owner: string;
   pierce: boolean;
+  /** Do controle remoto: espera o dono detonar. */
+  remote: boolean;
+  /** A remota foi detonada (ou o pavio reserva acabou): está piscando para explodir. */
+  armed: boolean;
   /** O pavio dela, em ms: muda com as maldições de pavio. A tela escolhe o quadro por ele. */
   fuse: number;
   /** Quem ainda está de pé em cima dela desde que nasceu, por `slot` (bit 1 << slot): para eles ela não fecha. */

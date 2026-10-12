@@ -46,6 +46,7 @@ export class LocalPlayer {
   /** Sem conexão (caiu e ainda não voltou): nada anda nem sai. */
   private online = false;
   private placeHandlers = new Set<() => void>();
+  private detonateHandlers = new Set<() => void>();
   private send: (batch: InputBatch) => void = () => {};
   private meId: () => string = () => "";
   private config: ClientNetConfig;
@@ -53,6 +54,7 @@ export class LocalPlayer {
   private dx = 0;
   private dy = 0;
   private bombWanted = false;
+  private detonateWanted = false;
   private acc = 0;
   private lastFrame = Number.NaN;
   private lastDt = 0;
@@ -95,6 +97,16 @@ export class LocalPlayer {
     this.bombWanted = true;
   }
 
+  requestDetonate() {
+    this.detonateWanted = true;
+  }
+
+  /** A detonação saiu (a tela já pisca a remota, antes de o servidor confirmar). Devolve como desligar. */
+  subscribeDetonate(handler: () => void): () => void {
+    this.detonateHandlers.add(handler);
+    return () => this.detonateHandlers.delete(handler);
+  }
+
   /**
    * Um quadro: roda os passos fixos que couberem no tempo que passou e manda
    * o que for preciso. `state` é o estado vivo do Colyseus.
@@ -107,6 +119,7 @@ export class LocalPlayer {
     if (!state || !this.online) {
       this.acc = 0;
       this.bombWanted = false;
+      this.detonateWanted = false;
       return;
     }
     this.acc += dt;
@@ -120,8 +133,10 @@ export class LocalPlayer {
     for (let i = 0; i < steps; i++) {
       this.acc -= TICK_MS;
       const bomb = this.bombWanted;
+      const detonate = this.detonateWanted;
       this.bombWanted = false;
-      const result = this.predictor.step(state, this.meId(), this.dx, this.dy, bomb, now);
+      this.detonateWanted = false;
+      const result = this.predictor.step(state, this.meId(), this.dx, this.dy, bomb, now, detonate);
       if (!result) {
         // Parou (ou não está em jogo): o que estava esperando vai já.
         this.flush();
@@ -130,13 +145,14 @@ export class LocalPlayer {
       }
       const { cmd, placed } = result;
       if (placed) for (const handler of this.placeHandlers) handler();
+      if (cmd.detonate) for (const handler of this.detonateHandlers) handler();
       const code = `${cmd.dx},${cmd.dy}`;
       const changed = code !== this.lastCode;
       this.lastCode = code;
       // Mudou de direção: o que era da direção anterior sai antes, e a nova vai junto no próximo.
       if (changed) this.flush();
       this.outbox.push(cmd);
-      if (cmd.bomb || changed || this.outbox.length >= SEND_EVERY_TICKS) this.flush();
+      if (cmd.bomb || cmd.detonate || changed || this.outbox.length >= SEND_EVERY_TICKS) this.flush();
     }
   }
 

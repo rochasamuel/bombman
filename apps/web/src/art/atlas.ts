@@ -183,8 +183,11 @@ export function sceneryFrames(theme: string = GARDEN): string[] {
 export type BombPhase = "idle" | "fuse" | "pulse" | "boom";
 export const BOMB_STEPS: Record<BombPhase, number> = { idle: 1, fuse: 6, pulse: 8, boom: 2 };
 /** Um quadro da bomba; a perfurante é a mesma bomba em vermelho. */
-export const bomb = (phase: BombPhase, step: number, pierce = false) =>
-  frame(`${pierce ? "pierce" : "bomb"}_${phase}${wrap(step, BOMB_STEPS[phase])}`);
+/** A bomba comum, a perfurante (vermelha) e a remota (com antena), nas mesmas fases. */
+export type BombKind = "bomb" | "pierce" | "remote";
+export const BOMB_KINDS: BombKind[] = ["bomb", "pierce", "remote"];
+export const bomb = (phase: BombPhase, step: number, kind: BombKind = "bomb") =>
+  frame(`${kind}_${phase}${wrap(step, BOMB_STEPS[phase])}`);
 
 /** A explosão é modular: o centro, os braços e as quatro pontas, todos nos mesmos oito quadros. */
 export type FlamePiece = "center" | "h" | "v" | "l" | "r" | "u" | "d";
@@ -196,7 +199,7 @@ export const flame = (piece: FlamePiece, step: number) => frame(`flame_${piece}$
 
 /** Cada item brilha em quatro quadros. */
 export const POWERUP_STEPS = 4;
-export const POWERUP_KINDS = ["fire", "bomb", "boot", "kick", "pierce", "skull", "swap", "ghost"];
+export const POWERUP_KINDS = ["fire", "bomb", "boot", "kick", "pierce", "skull", "swap", "ghost", "remote"];
 export function powerup(kind: string, step: number): Frame {
   const name = `pu_${POWERUP_KINDS.includes(kind) ? kind : "fire"}${wrap(step, POWERUP_STEPS)}`;
   return frame(name);
@@ -217,7 +220,7 @@ export function requiredFrames(): string[] {
     for (let i = 0; i < POWERUP_STEPS; i++) names.push(`pu_${kind}${i}`);
   }
   for (const [phase, steps] of Object.entries(BOMB_STEPS)) {
-    for (let i = 0; i < steps; i++) names.push(`bomb_${phase}${i}`, `pierce_${phase}${i}`);
+    for (let i = 0; i < steps; i++) for (const kind of BOMB_KINDS) names.push(`${kind}_${phase}${i}`);
   }
   for (const piece of FLAME_PIECES) {
     for (let i = 0; i < FLAME_STEPS; i++) names.push(`flame_${piece}${i}`);

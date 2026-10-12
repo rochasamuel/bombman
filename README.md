@@ -22,8 +22,14 @@ muralha e pilar; morrer leva o chute e a perfurante, só eles), 💀 uma maldiç
 sem freio, fogo fraco, bombas sem parar, sem bomba, pavio curto, pavio longo
 ou uma bomba só; toda maldição pega: quem encosta num amaldiçoado leva a
 mesma, pelos quinze segundos inteiros), 🔄 a troca (você troca de lugar na
-hora com um adversário sorteado) e 👻 a invisibilidade (dez segundos em que
-os outros só te veem num lampejo). Quem perde as três vidas sai; a última
+hora com um adversário sorteado), 👻 a invisibilidade (dez segundos em que
+os outros só te veem num lampejo) e 📡 o controle remoto (as suas bombas
+ganham antena e esperam: **C** ou **Shift** — no celular, o botão 📡 — detona
+a mais antiga, que pisca 300 ms em todas as telas e só então explode; o aviso
+cobre o ping de quase todo mundo, e ninguém morre de uma bomba que não viu
+piscar. Esquecida, ela explode sozinha em 10 s; morrer leva o controle, e as
+remotas que esperavam viram bombas comuns. Pavio curto, pavio longo e bombas
+sem parar ganham do controle enquanto duram). Quem perde as três vidas sai; a última
 pessoa de pé vence. Deu o tempo (3 minutos), vence quem tiver mais vidas.
 
 ## Arquitetura
@@ -96,7 +102,9 @@ a união dos dois braços, e a ponta ganha a meia lente do lado de dentro — a
 cruz é uma chama só, de ponta a ponta, em qualquer alcance. Cada item brilha
 em quatro quadros, e todos os seis da folha entram, a caveira, o chute e a
 perfurante inclusive; a troca e a invisibilidade vêm de uma folha própria, a
-última do comando (fundo já transparente, só se recorta a janela). A bomba
+21ª do comando (fundo já transparente, só se recorta a janela), e as duas
+últimas são a bomba remota (com antena, nas fases da bomba comum) e o ícone do
+controle remoto. A bomba
 perfurante tem folha própria, a 15ª do comando: vermelha,
 com a ponta dourada, nas mesmas fases da bomba comum; a esfera dela ganha o
 tamanho e o lugar da bomba comum pela faixa do corpo, não pela caixa justa.
@@ -136,7 +144,8 @@ node apps/web/scripts/build-atlas.cjs bomb-garden-arena.png bomb-sprite-sheet.pn
   bomb-iso_idle_left-trimmed.png bomb-iso_custom_victory_down.png bomb-tileset.png \
   bomb-fuse-sheet.png bomb-explosion-sheet.png bomb-items-sheet.png bomb-pierce-sheet.png \
   enchanted_forest_tileset.png volcanic_fortress_tileset.png frozen_citadel_tileset.png \
-  cyberpunk_facility_tileset.png desert_temple_tileset.png bomb-social-items-sheet.png
+  cyberpunk_facility_tileset.png desert_temple_tileset.png bomb-social-items-sheet.png \
+  bomb-remote-sheet.png bomb-remote-item-sheet.png
 ```
 
 Os cinco últimos são os tilesets dos temas novos (ver abaixo).

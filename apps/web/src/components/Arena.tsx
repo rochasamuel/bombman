@@ -124,6 +124,10 @@ export function Arena({ state, live, local, setDiag, sessionId, actions, onFx, o
    */
   const placedLocally = useRef(0);
   useEffect(
+    () => local?.subscribeDetonate(() => rendererRef.current?.detonated(stateRef.current, performance.now())),
+    [local],
+  );
+  useEffect(
     () =>
       local?.subscribePlace(() => {
         placedLocally.current++;
@@ -229,10 +233,10 @@ export function Arena({ state, live, local, setDiag, sessionId, actions, onFx, o
       <div className="flex w-full flex-col items-stretch gap-3 md:flex-row md:items-start md:justify-end">
         <div className="flex flex-col items-center gap-3 md:flex-row md:items-start">
           {showPad ? (
-            <TouchPad controls={controls} />
+            <TouchPad controls={controls} remote={!!me?.remote} />
           ) : (
             <p className="px-label text-center md:text-right">
-              setas ou WASD andam · espaço solta a bomba
+              setas ou WASD andam · espaço solta a bomba{me?.remote && " · C detona"}
             </p>
           )}
           <EmotePicker onSend={actions.emote} />

@@ -15,6 +15,7 @@ import {
   TILE,
   UP,
   WALL,
+  REMOTE_ARM_MS,
   bombFuse,
   cellIndex,
   type ArenaState,
@@ -24,7 +25,7 @@ import * as art from "../art/atlas";
 import type { Facing, FlamePiece, Frame } from "../art/atlas";
 import { BACKGROUND, MARGIN, STRETCH } from "../art/scenario";
 import { ornamentsOf, themeArt, type ThemeArt } from "../art/themes";
-import { bombFrame, flameStep, itemStep } from "./fuse";
+import { bombFrame, flameStep, itemStep, remoteFrame } from "./fuse";
 import { DELAY_MS, record, sampleAt, type Sample } from "./interp";
 import type { LocalPlayer } from "./local";
 import { idleStep, walkStep } from "./walk";
@@ -105,6 +106,10 @@ export class ArenaRenderer {
   private puppets = new Map<string, Puppet>();
   /** Quando cada bomba (por id) e cada chama (por célula e nascimento) apareceu, no relógio da tela. */
   private bombSeen = new Map<string, number>();
+  /** Quando a tela viu cada remota começar a piscar (no clique, para a própria; senão, pelo estado). */
+  private armedSeen = new Map<string, number>();
+  /** Se cada bomba era remota no quadro anterior: a do dono que morreu vira comum e o pavio recomeça. */
+  private remoteSeen = new Map<string, boolean>();
   /** O rastro de cada bomba, por id: chutada, ela anda e é interpolada como os bonecos. */
   private bombTrails = new Map<string, Sample[]>();
   private flameSeen = new Map<string, number>();
@@ -358,6 +363,17 @@ export class ArenaRenderer {
     }
   }
 
+  /**
+   * O jogador desta tela detonou: a remota mais antiga dele que ainda espera
+   * começa a piscar já, sem esperar a ida e volta (o servidor faz a mesma
+   * escolha, na mesma ordem). Se ele não confirmar, ela volta a esperar.
+   */
+  detonated(state: ArenaState, now: number) {
+    const id = this.local?.id ?? this.viewer;
+    const bomb = state.bombs.find((b) => b.owner === id && b.remote && !b.armed && !this.armedSeen.has(b.id));
+    if (bomb) this.armedSeen.set(bomb.id, now);
+  }
+
   private layBombs(layer: Drawable[], state: ArenaState, now: number, stamp: number) {
     const alive = new Set<string>();
     const predictor = this.local?.player.predictor;
@@ -368,9 +384,23 @@ export class ArenaRenderer {
         const ghostAt = bomb.owner === this.local?.id ? predictor?.ghostStart(bomb.cx, bomb.cy) : undefined;
         if (ghostAt !== undefined) this.bombSeen.set(bomb.id, ghostAt);
       }
-      // O pavio queima desde que a tela viu a bomba; o pulso e o estouro vêm no fim do fuso.
-      const { phase, step } = bombFrame(now - this.firstSeen(this.bombSeen, bomb.id, now), bomb.fuse || undefined);
-      const frame = art.bomb(phase, step, bomb.pierce);
+      if (this.remoteSeen.get(bomb.id) && !bomb.remote) this.bombSeen.set(bomb.id, now);
+      this.remoteSeen.set(bomb.id, bomb.remote);
+      const age = now - this.firstSeen(this.bombSeen, bomb.id, now);
+      let frame: Frame;
+      if (bomb.remote) {
+        if (bomb.armed && !this.armedSeen.has(bomb.id)) this.armedSeen.set(bomb.id, now);
+        const armedAt = this.armedSeen.get(bomb.id);
+        // A piscada prevista no clique que o servidor não confirmou (não havia o que detonar): volta a esperar.
+        if (armedAt !== undefined && !bomb.armed && now - armedAt > REMOTE_ARM_MS + 600) this.armedSeen.delete(bomb.id);
+        const shown = this.armedSeen.get(bomb.id);
+        const { phase, step } = remoteFrame(shown === undefined ? null : now - shown, age);
+        frame = art.bomb(phase, step, "remote");
+      } else {
+        // O pavio queima desde que a tela viu a bomba; o pulso e o estouro vêm no fim do fuso.
+        const { phase, step } = bombFrame(age, bomb.fuse || undefined);
+        frame = art.bomb(phase, step, bomb.pierce ? "pierce" : "bomb");
+      }
       const w = art.logicalWidth(frame);
       const h = art.logicalHeight(frame);
       // Parada, o centro é o da célula; chutada, segue o rastro com o mesmo atraso dos bonecos.
@@ -386,8 +416,10 @@ export class ArenaRenderer {
       const me = state.players.find((p) => p.id === this.local!.id);
       for (const ghost of predictor.ghosts) {
         if (state.bombs.some((b) => b.cx === ghost.cx && b.cy === ghost.cy)) continue;
-        const { phase, step } = bombFrame(now - ghost.at, bombFuse(me?.curse ?? ""));
-        const frame = art.bomb(phase, step, !!me?.pierce);
+        const curse = me?.curse ?? "";
+        const remote = !!me?.remote && curse !== "shortfuse" && curse !== "longfuse" && curse !== "diarrhea";
+        const { phase, step } = remote ? remoteFrame(null, now - ghost.at) : bombFrame(now - ghost.at, bombFuse(curse));
+        const frame = art.bomb(phase, step, remote ? "remote" : me?.pierce ? "pierce" : "bomb");
         const w = art.logicalWidth(frame);
         const h = art.logicalHeight(frame);
         const foot = (ghost.cy + 1) * TILE;
@@ -396,6 +428,8 @@ export class ArenaRenderer {
     }
     forget(this.bombSeen, alive);
     forget(this.bombTrails, alive);
+    forget(this.armedSeen, alive);
+    forget(this.remoteSeen, alive);
   }
 
   private layFlames(layer: Drawable[], state: ArenaState, now: number) {

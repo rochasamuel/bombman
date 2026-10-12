@@ -91,6 +91,7 @@ function stillLife(arena: ArenaDefinition, themeId: string): ArenaState {
       invulnerable: false,
       curse: "",
       ghost: false,
+      remote: false,
       wins: 0,
       seq: 0,
     })),
