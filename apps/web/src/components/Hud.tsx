@@ -11,6 +11,7 @@ import {
 import { characterPose, heart } from "../art/atlas";
 import type { Bubble } from "../game/useEmotes";
 import { EmoteBubble } from "./EmoteBubble";
+import { useMediaQuery } from "../lib/useMediaQuery";
 import { PixelSprite } from "./PixelSprite";
 
 type Props = {
@@ -24,33 +25,53 @@ type Props = {
  * "P1" e os três corações, e o relógio no meio. Os quadros ficam sempre nos
  * quatro lugares, na ordem das cores — um canto vazio é um quadro apagado,
  * para a fileira não dançar quando alguém entra.
+ *
+ * No celular em pé, o painel é uma fileira só, relógio no meio: o quadro
+ * perde o nome (a cor, o "P1" e o contorno branco de "você" bastam) e
+ * empilha o "P1" sobre os corações, ao lado de um retrato menor. A altura
+ * que sobra vai para a arena.
  */
 export function Hud({ state, sessionId, bubbles }: Props) {
   const bySlot = new Map(state.players.map((p) => [p.slot, p]));
   const slots = Array.from({ length: MAX_PLAYERS }, (_, i) => i);
   const left = slots.slice(0, 2);
   const right = slots.slice(2);
+  const compact = useMediaQuery("(max-width: 639px)");
+  const panel = (slot: number) => (
+    <Panel key={slot} slot={slot} player={bySlot.get(slot)} me={sessionId} bubble={bubbles} compact={compact} />
+  );
+
+  if (compact) {
+    return (
+      <div className="bomb-hud-compact flex w-full items-stretch justify-center gap-1.5">
+        {left.map(panel)}
+        <Timer state={state} compact />
+        {right.map(panel)}
+      </div>
+    );
+  }
 
   return (
     <div className="flex w-full flex-wrap items-stretch justify-center gap-2 sm:flex-nowrap">
-      {left.map((slot) => (
-        <Panel key={slot} slot={slot} player={bySlot.get(slot)} me={sessionId} bubble={bubbles} />
-      ))}
+      {left.map(panel)}
       <Timer state={state} />
-      {right.map((slot) => (
-        <Panel key={slot} slot={slot} player={bySlot.get(slot)} me={sessionId} bubble={bubbles} />
-      ))}
+      {right.map(panel)}
     </div>
   );
 }
 
-function Timer({ state }: { state: ArenaState }) {
+function Timer({ state, compact = false }: { state: ArenaState; compact?: boolean }) {
   const seconds = Math.ceil(state.timeLeft / 1000);
   const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
   const ss = String(seconds % 60).padStart(2, "0");
   const urgent = state.phase === "playing" && seconds <= hurryTimeOf(state.arenaId) / 1000;
   return (
-    <div className={["bomb-timer order-first basis-full text-center sm:order-none sm:basis-auto", urgent && "is-urgent"]
+    <div
+      className={[
+        "bomb-timer",
+        compact ? "is-compact" : "order-first basis-full text-center sm:order-none sm:basis-auto",
+        urgent && "is-urgent",
+      ]
       .filter(Boolean)
       .join(" ")}
     >
@@ -64,11 +85,13 @@ function Panel({
   player,
   me,
   bubble,
+  compact,
 }: {
   slot: number;
   player?: PublicPlayer;
   me: string;
   bubble: Record<string, Bubble>;
+  compact: boolean;
 }) {
   const tint = SLOT_COLORS[slot];
   const out = !!player && !player.alive && !player.dying && player.lives === 0;
@@ -77,9 +100,40 @@ function Panel({
     !player && "is-out",
     out && "is-out",
     player?.id === me && "is-me",
+    compact && "is-compact",
   ]
     .filter(Boolean)
     .join(" ");
+
+  const emote = player && bubble[player.id] && (
+    <span className="absolute top-full left-1/2 z-20 -translate-x-1/2 pt-1">
+      <EmoteBubble key={bubble[player.id].seq} emote={bubble[player.id].emote} />
+    </span>
+  );
+
+  if (compact) {
+    return (
+      <div
+        className={classes}
+        style={{ "--tint": tint } as React.CSSProperties}
+        title={player ? player.name : "vazio"}
+      >
+        <PixelSprite frame={characterPose(slot, "head")} scale={1.5} />
+        <div className="flex flex-col gap-0.5">
+          <span className="bomb-panel-tag">
+            P{slot + 1}
+            {player && !player.connected && " ⌁"}
+          </span>
+          <div className="flex items-center gap-px">
+            {Array.from({ length: LIVES }, (_, i) => (
+              <PixelSprite key={i} frame={heart(!!player && i < player.lives)} scale={1} />
+            ))}
+          </div>
+        </div>
+        {emote}
+      </div>
+    );
+  }
 
   return (
     <div className={classes} style={{ "--tint": tint } as React.CSSProperties}>
@@ -103,11 +157,7 @@ function Panel({
           {player && <Stats player={player} />}
         </div>
       </div>
-      {player && bubble[player.id] && (
-        <span className="absolute top-full left-1/2 z-20 -translate-x-1/2 pt-1">
-          <EmoteBubble key={bubble[player.id].seq} emote={bubble[player.id].emote} />
-        </span>
-      )}
+      {emote}
     </div>
   );
 }

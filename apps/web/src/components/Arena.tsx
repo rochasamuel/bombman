@@ -83,6 +83,8 @@ export function Arena({ state, live, local, setDiag, sessionId, actions, onFx, o
       let siblings = 0;
       for (const child of main.children) {
         if (child === frame) continue;
+        // Deitado no celular, os controles flutuam sobre a arena: não tomam altura.
+        if (getComputedStyle(child).position === "fixed") continue;
         around += (child as HTMLElement).offsetHeight;
         siblings++;
       }
@@ -246,7 +248,7 @@ export function Arena({ state, live, local, setDiag, sessionId, actions, onFx, o
 
       {/* Embaixo: a dica (ou o direcional) e o balão, à direita. O registro da
           arena fica escondido por enquanto; `state.log` continua chegando. */}
-      <div className="flex w-full flex-col items-stretch gap-3 md:flex-row md:items-start md:justify-end">
+      <div className="bomb-controls flex w-full flex-col items-stretch gap-3 md:flex-row md:items-start md:justify-end">
         <div className="flex flex-col items-center gap-3 md:flex-row md:items-start">
           {showPad ? (
             <TouchPad controls={controls} remote={!!me?.remote} />

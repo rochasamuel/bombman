@@ -1,90 +1,167 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { clampToRadius, stickDir } from "../game/stick";
 import type { Dir, InputControls } from "../game/useInput";
 
+/** Até onde o botão do joystick anda a partir do centro da base, em pixels CSS. */
+const TRAVEL = 30;
+
+const ARROWS: [Dir, string][] = [
+  ["up", "▲"],
+  ["right", "▶"],
+  ["down", "▼"],
+  ["left", "◀"],
+];
+
+/** Um toque curto no celular quando a direção muda; onde não há vibração, nada. */
+const buzz = () => navigator.vibrate?.(6);
+
 /**
- * O direcional na tela, para quem joga no dedo. Quatro setas e o botão da
- * bomba, grandes o bastante para o polegar; com o controle remoto, um botão
- * menor de detonar aparece ao lado da bomba. Eventos de ponteiro, e não de
- * clique: a seta vale ENQUANTO está apertada, e o dedo pode escorregar de uma
- * para a outra sem levantar — daí capturar o ponteiro e seguir o alvo.
+ * Os controles na tela, para quem joga no dedo. À esquerda, um joystick FIXO:
+ * a base não sai do lugar, e o polegar arrasta o botão dentro dela — tocar já
+ * à direita do centro é andar para a direita, sem precisar arrastar desde o
+ * meio. O vetor vira uma das quatro setas (ver `game/stick.ts`). À direita, a
+ * bomba e, ao lado, o detonador do controle remoto — sempre no lugar, para o
+ * polegar decorar onde fica, e apagado enquanto o jogador não tem o item.
+ *
+ * Segurar o dedo num botão não pode abrir o menu de copiar do celular: nada
+ * aqui é selecionável (ver `.bomb-touch` no CSS) e o menu de contexto é
+ * cancelado. Deitado, os controles flutuam semitransparentes sobre a arena.
+ *
+ * Eventos de ponteiro, com captura: o dedo pode sair da base e continuar
+ * mandando, e cada polegar segura o seu controle sem roubar o do outro.
  */
 export function TouchPad({ controls, remote }: { controls: InputControls; remote: boolean }) {
-  const [down, setDown] = useState<Dir | null>(null);
-  const [firing, setFiring] = useState(false);
-  const [detonating, setDetonating] = useState(false);
-
-  const start = (dir: Dir) => (event: React.PointerEvent) => {
-    event.preventDefault();
-    (event.target as HTMLElement).setPointerCapture?.(event.pointerId);
-    setDown(dir);
-    controls.press(dir);
-  };
-  const stop = (dir: Dir) => (event: React.PointerEvent) => {
-    event.preventDefault();
-    setDown((current) => (current === dir ? null : current));
-    controls.release(dir);
-  };
-
-  const key = (dir: Dir, label: string, style: React.CSSProperties) => (
-    <button
-      type="button"
-      className={["bomb-pad-key", down === dir && "is-down"].filter(Boolean).join(" ")}
-      style={style}
-      onPointerDown={start(dir)}
-      onPointerUp={stop(dir)}
-      onPointerCancel={stop(dir)}
-      onPointerLeave={stop(dir)}
-      onContextMenu={(event) => event.preventDefault()}
-      aria-label={dir}
-    >
-      {label}
-    </button>
-  );
-
   return (
-    <div className="flex w-full items-center justify-between px-2">
-      <div className="bomb-pad">
-        {key("up", "▲", { gridColumn: 2, gridRow: 1 })}
-        {key("left", "◀", { gridColumn: 1, gridRow: 2 })}
-        {key("right", "▶", { gridColumn: 3, gridRow: 2 })}
-        {key("down", "▼", { gridColumn: 2, gridRow: 3 })}
-      </div>
-      <div className="flex items-end gap-3">
-      {remote && (
-        <button
-          type="button"
-          className={["bomb-fire bomb-detonate", detonating && "is-down"].filter(Boolean).join(" ")}
-          onPointerDown={(event) => {
-            event.preventDefault();
-            setDetonating(true);
-            controls.detonate();
-          }}
-          onPointerUp={() => setDetonating(false)}
-          onPointerCancel={() => setDetonating(false)}
-          onPointerLeave={() => setDetonating(false)}
-          onContextMenu={(event) => event.preventDefault()}
-          aria-label="detonar"
-        >
-          📡
-        </button>
-      )}
-      <button
-        type="button"
-        className={["bomb-fire", firing && "is-down"].filter(Boolean).join(" ")}
-        onPointerDown={(event) => {
-          event.preventDefault();
-          setFiring(true);
-          controls.bomb();
-        }}
-        onPointerUp={() => setFiring(false)}
-        onPointerCancel={() => setFiring(false)}
-        onPointerLeave={() => setFiring(false)}
-        onContextMenu={(event) => event.preventDefault()}
-        aria-label="bomba"
-      >
-        💣
-      </button>
+    <div className="bomb-touch flex w-full items-center justify-between px-2">
+      <Stick controls={controls} />
+      <div className="bomb-touch-fire flex items-end gap-3">
+        <FireButton
+          className="bomb-detonate"
+          label="detonar"
+          glyph="📡"
+          off={!remote}
+          onPress={controls.detonate}
+        />
+        <FireButton label="bomba" glyph="💣" onPress={controls.bomb} />
       </div>
     </div>
+  );
+}
+
+function Stick({ controls }: { controls: InputControls }) {
+  const zone = useRef<HTMLDivElement>(null);
+  const pointer = useRef<number | null>(null);
+  const dirRef = useRef<Dir | null>(null);
+  const [dir, setDir] = useState<Dir | null>(null);
+  const [knob, setKnob] = useState<[number, number]>([0, 0]);
+
+  const steer = (next: Dir | null) => {
+    const prev = dirRef.current;
+    if (next === prev) return;
+    if (prev) controls.release(prev);
+    if (next) {
+      controls.press(next);
+      buzz();
+    }
+    dirRef.current = next;
+    setDir(next);
+  };
+
+  const track = (event: React.PointerEvent) => {
+    const box = zone.current?.getBoundingClientRect();
+    if (!box) return;
+    const dx = event.clientX - (box.left + box.width / 2);
+    const dy = event.clientY - (box.top + box.height / 2);
+    setKnob(clampToRadius(dx, dy, TRAVEL));
+    steer(stickDir(dx, dy, dirRef.current));
+  };
+
+  const end = (event: React.PointerEvent) => {
+    if (event.pointerId !== pointer.current) return;
+    pointer.current = null;
+    setKnob([0, 0]);
+    steer(null);
+  };
+
+  return (
+    <div
+      ref={zone}
+      className={["bomb-stick", dir && "is-held"].filter(Boolean).join(" ")}
+      onPointerDown={(event) => {
+        if (pointer.current !== null) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        pointer.current = event.pointerId;
+        track(event);
+      }}
+      onPointerMove={(event) => {
+        if (event.pointerId === pointer.current) track(event);
+      }}
+      onPointerUp={end}
+      onPointerCancel={end}
+      onLostPointerCapture={end}
+      onContextMenu={(event) => event.preventDefault()}
+      role="group"
+      aria-label="direcional"
+    >
+      <div className="bomb-stick-base px-round">
+        <div className="bomb-stick-face px-round">
+          {ARROWS.map(([d, glyph]) => (
+            <span key={d} className={`bomb-stick-arrow is-${d}`} data-on={dir === d || undefined}>
+              {glyph}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div
+        className="bomb-stick-knob px-round"
+        style={{ transform: `translate(${knob[0]}px, ${knob[1]}px)` }}
+      >
+        <div className="bomb-stick-knob-face px-round" />
+      </div>
+    </div>
+  );
+}
+
+function FireButton({
+  label,
+  glyph,
+  onPress,
+  off = false,
+  className,
+}: {
+  label: string;
+  glyph: string;
+  onPress: () => void;
+  off?: boolean;
+  className?: string;
+}) {
+  const [down, setDown] = useState(false);
+  const release = () => setDown(false);
+  return (
+    <button
+      type="button"
+      className={["bomb-fire px-round", className, down && "is-down", off && "is-off"]
+        .filter(Boolean)
+        .join(" ")}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        if (off) return;
+        setDown(true);
+        onPress();
+      }}
+      onPointerUp={release}
+      onPointerCancel={release}
+      onPointerLeave={release}
+      onContextMenu={(event) => event.preventDefault()}
+      aria-label={label}
+      aria-disabled={off || undefined}
+    >
+      <span className="bomb-fire-face px-round">
+        <span className="bomb-fire-glyph" aria-hidden>
+          {glyph}
+        </span>
+      </span>
+    </button>
   );
 }

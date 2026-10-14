@@ -444,6 +444,25 @@ body {
     var(--drop-sm);
   padding: 4px 14px;
 }
+/* O painel do celular em pé: tudo numa fileira, cada quadro no mínimo. */
+.bomb-panel.is-compact {
+  flex: 1 1 0;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px;
+}
+.bomb-panel.is-compact .bomb-panel-tag {
+  font-size: 11px;
+  line-height: 1;
+}
+.bomb-timer.is-compact {
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+}
 .bomb-timer.is-urgent {
   color: var(--mark);
   animation: px-blink 1s steps(1, end) infinite;
@@ -553,65 +572,275 @@ body {
   border-bottom: 2px solid var(--gloss);
 }
 
-/* ---- o direcional na tela ------------------------------------------------ */
+/* ---- os controles na tela ---------------------------------------------- */
 
-.bomb-pad {
+/*
+ * O "redondo" do sistema: sem border-radius, um círculo em três degraus de
+ * `--c`, como um círculo desenhado à mão no pixel art. A borda é o elemento
+ * de fora (a cor do contorno) e a face, o de dentro, 2px menor com o mesmo
+ * recorte; a sombra dura vem de `drop-shadow`, que segue o recorte.
+ */
+.px-round {
+  --c: 4px;
+  clip-path: polygon(
+    calc(var(--c) * 4) 0, calc(100% - var(--c) * 4) 0,
+    calc(100% - var(--c) * 4) var(--c), calc(100% - var(--c) * 2) var(--c),
+    calc(100% - var(--c) * 2) calc(var(--c) * 2), calc(100% - var(--c)) calc(var(--c) * 2),
+    calc(100% - var(--c)) calc(var(--c) * 4), 100% calc(var(--c) * 4),
+    100% calc(100% - var(--c) * 4), calc(100% - var(--c)) calc(100% - var(--c) * 4),
+    calc(100% - var(--c)) calc(100% - var(--c) * 2), calc(100% - var(--c) * 2) calc(100% - var(--c) * 2),
+    calc(100% - var(--c) * 2) calc(100% - var(--c)), calc(100% - var(--c) * 4) calc(100% - var(--c)),
+    calc(100% - var(--c) * 4) 100%, calc(var(--c) * 4) 100%,
+    calc(var(--c) * 4) calc(100% - var(--c)), calc(var(--c) * 2) calc(100% - var(--c)),
+    calc(var(--c) * 2) calc(100% - var(--c) * 2), var(--c) calc(100% - var(--c) * 2),
+    var(--c) calc(100% - var(--c) * 4), 0 calc(100% - var(--c) * 4),
+    0 calc(var(--c) * 4), var(--c) calc(var(--c) * 4),
+    var(--c) calc(var(--c) * 2), calc(var(--c) * 2) calc(var(--c) * 2),
+    calc(var(--c) * 2) var(--c), calc(var(--c) * 4) var(--c)
+  );
+}
+
+/* O joystick: a área de toque é maior que a base, para o polegar não errar. */
+.bomb-stick {
+  position: relative;
+  width: 156px;
+  height: 156px;
   display: grid;
-  grid-template-columns: repeat(3, 56px);
-  grid-template-rows: repeat(3, 56px);
-  gap: 2px;
-  touch-action: none;
-}
-.bomb-pad-key {
-  font: inherit;
-  font-size: 20px;
-  color: var(--paper);
-  background: var(--slab-hi);
-  border: var(--stroke) solid var(--rim);
-  box-shadow: var(--bevel), var(--drop-sm);
+  place-items: center;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
-.bomb-pad-key.is-down {
-  transform: translate(2px, 2px);
-  box-shadow: var(--bevel);
-  background: var(--gloss);
+.bomb-stick > * {
+  grid-area: 1 / 1;
 }
-.bomb-fire {
-  font: inherit;
-  width: 88px;
-  height: 88px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--ink);
-  background: var(--mark);
-  border: var(--stroke) solid var(--rim);
+.bomb-stick-base {
+  --c: 7px;
+  width: 136px;
+  height: 136px;
+  padding: var(--stroke);
+  background: var(--rim);
+  filter: drop-shadow(4px 4px 0 rgba(6, 6, 8, 0.7));
+}
+.bomb-stick-face {
+  --c: 7px;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--slab-sh);
   box-shadow:
-    inset 2px 2px 0 var(--mark-hi),
-    inset -2px -2px 0 var(--mark-sh),
-    var(--drop);
-  touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
+    inset 3px 3px 0 var(--rim),
+    inset -2px -2px 0 var(--gloss);
 }
-/* O detonador do controle remoto: menor, ao lado da bomba. */
-.bomb-detonate {
+/* As quatro setas gravadas na base; a que vale acende. */
+.bomb-stick-arrow {
+  position: absolute;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--gloss);
+  transition: color 80ms steps(1);
+}
+.bomb-stick-arrow[data-on] {
+  color: var(--mark);
+}
+.bomb-stick-arrow.is-up {
+  top: 8px;
+  left: 50%;
+  translate: -50% 0;
+}
+.bomb-stick-arrow.is-down {
+  bottom: 8px;
+  left: 50%;
+  translate: -50% 0;
+}
+.bomb-stick-arrow.is-left {
+  left: 9px;
+  top: 50%;
+  translate: 0 -50%;
+}
+.bomb-stick-arrow.is-right {
+  right: 9px;
+  top: 50%;
+  translate: 0 -50%;
+}
+.bomb-stick-knob {
+  --c: 4px;
   width: 60px;
   height: 60px;
-  font-size: 22px;
-  background: var(--slab);
+  padding: var(--stroke);
+  background: var(--rim);
+  filter: drop-shadow(3px 3px 0 rgba(6, 6, 8, 0.7));
+  pointer-events: none;
+}
+.bomb-stick-knob-face {
+  --c: 4px;
+  width: 100%;
+  height: 100%;
+  background: var(--slab-hi);
   box-shadow:
-    var(--bevel),
-    var(--drop);
+    inset 3px 3px 0 var(--gloss),
+    inset -3px -3px 0 var(--slab-sh);
+}
+/* Segurando, o botão é da cor da ênfase: o polegar vê que pegou. */
+.bomb-stick.is-held .bomb-stick-knob-face {
+  background: var(--mark);
+  box-shadow:
+    inset 3px 3px 0 var(--mark-hi),
+    inset -3px -3px 0 var(--mark-sh);
+}
+
+/* A bomba: a arte da própria bomba numa face amarela. */
+.bomb-fire {
+  --c: 6px;
+  font: inherit;
+  width: 104px;
+  height: 104px;
+  padding: var(--stroke);
+  border: 0;
+  background: var(--rim);
+  filter: drop-shadow(4px 4px 0 rgba(6, 6, 8, 0.7));
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.bomb-fire-face {
+  --c: 6px;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  background: var(--mark);
+  box-shadow:
+    inset 4px 4px 0 var(--mark-hi),
+    inset -4px -4px 0 var(--mark-sh);
+}
+.bomb-fire-face > * {
+  pointer-events: none;
+}
+/* O emoji no centro óptico: sem entrelinha, e um pixel acima, que o emoji
+   desenha com a base mais baixa que o meio da caixa. */
+.bomb-fire-glyph {
+  display: block;
+  font-size: 48px;
+  line-height: 1;
+  translate: 0 -1px;
+  filter: drop-shadow(2px 2px 0 var(--mark-sh));
+}
+.bomb-detonate .bomb-fire-glyph {
+  font-size: 28px;
+  filter: drop-shadow(2px 2px 0 var(--rim));
+}
+/* Sem o controle remoto, o detonador fica no lugar, mas apagado. */
+.bomb-fire.is-off {
+  opacity: 0.35;
+}
+.bomb-fire.is-off .bomb-fire-glyph {
+  filter: grayscale(1);
 }
 .bomb-fire.is-down {
-  transform: translate(2px, 2px);
+  transform: translate(3px, 3px);
+  filter: drop-shadow(1px 1px 0 rgba(6, 6, 8, 0.7));
+}
+.bomb-fire.is-down .bomb-fire-face {
   box-shadow:
-    inset 2px 2px 0 var(--mark-hi),
-    inset -2px -2px 0 var(--mark-sh);
+    inset 4px 4px 0 var(--mark-sh),
+    inset -2px -2px 0 var(--mark-hi);
+}
+/* O detonador do controle remoto: menor, chapa escura, ao lado da bomba. */
+.bomb-detonate {
+  --c: 4px;
+  width: 68px;
+  height: 68px;
+}
+.bomb-detonate .bomb-fire-face {
+  --c: 4px;
+  background: var(--slab-hi);
+  box-shadow:
+    inset 3px 3px 0 var(--gloss),
+    inset -3px -3px 0 var(--slab-sh);
+}
+.bomb-detonate.is-down .bomb-fire-face {
+  background: var(--slab);
+  box-shadow:
+    inset 3px 3px 0 var(--slab-sh),
+    inset -2px -2px 0 var(--gloss);
+}
+
+/* Telas estreitas (≤ 380px): joystick, detonador e bomba não cabem lado a
+   lado no tamanho cheio; tudo encolhe um degrau. */
+@media (max-width: 380px) {
+  .bomb-stick {
+    width: 140px;
+    height: 140px;
+  }
+  .bomb-stick-base {
+    width: 128px;
+    height: 128px;
+  }
+  .bomb-fire {
+    width: 92px;
+    height: 92px;
+  }
+  .bomb-fire-glyph {
+    font-size: 42px;
+  }
+  .bomb-detonate {
+    width: 60px;
+    height: 60px;
+  }
+  .bomb-detonate .bomb-fire-glyph {
+    font-size: 24px;
+  }
+}
+
+/* Segurar o dedo não seleciona, não abre a lupa nem o menu de copiar,
+   e o toque não pisca o realce azul do navegador. */
+.bomb-touch,
+.bomb-touch * {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Celular deitado: a altura é pouca, então os controles saem de baixo da
+   arena e flutuam sobre os cantos, semitransparentes; o que é tocado acende.
+   Fixos, não ocupam altura — a medição da arena (Arena.tsx) passa a dar
+   a tela inteira para o canvas. */
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 540px) {
+  /* A fileira de baixo inteira sai do fluxo: o balão de falar fica no meio,
+     entre o joystick e a bomba. */
+  .bomb-controls {
+    position: fixed;
+    inset: auto 0 max(8px, env(safe-area-inset-bottom)) 0;
+    z-index: 30;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+  .bomb-controls > * > :not(.bomb-touch) {
+    pointer-events: auto;
+  }
+  .bomb-touch {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 30;
+    padding: 0 max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom))
+      max(12px, env(safe-area-inset-left));
+    align-items: flex-end;
+    pointer-events: none;
+  }
+  .bomb-touch > * {
+    pointer-events: auto;
+    opacity: 0.45;
+    transition: opacity 120ms steps(2);
+  }
+  .bomb-touch > .bomb-stick.is-held,
+  .bomb-touch > .bomb-touch-fire:has(.is-down) {
+    opacity: 0.85;
+  }
 }
 
 /* ---- movimento reduzido -------------------------------------------------- */
